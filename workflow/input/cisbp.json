@@ -1,0 +1,17 @@
+{
+    "organisms": [
+        "Solanum lycopersicum",
+        "Oryza sativa",
+        "Cucumis sativus",
+        "Glycine max",
+        "Zea mays"
+    ],
+    "urls": {
+        "AT3G20840": "http://cisbp.ccbr.utoronto.ca/TFreport.php?searchTF=T000472_2.00",
+        "AT1G51190": "http://cisbp.ccbr.utoronto.ca/TFreport.php?searchTF=T000427_2.00",
+        "AT5G10510": "http://cisbp.ccbr.utoronto.ca/TFreport.php?searchTF=T000507_2.00",
+        "AT5G17430": "http://cisbp.ccbr.utoronto.ca/TFreport.php?searchTF=T000512_2.00",
+        "AT5G57390": "http://cisbp.ccbr.utoronto.ca/TFreport.php?searchTF=T000529_2.00",
+        "AT5G65510": "http://cisbp.ccbr.utoronto.ca/TFreport.php?searchTF=T000536_2.00"
+    }
+}
