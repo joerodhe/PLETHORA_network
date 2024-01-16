@@ -1,0 +1,392 @@
+configfile: "workflow/config.yaml"
+import pandas as pd
+from os.path import join
+from pathlib import Path
+from os.path import exists
+from os import listdir
+
+# To obtain a diagram plot: snakemake --forceall --rulegraph | dot -Tpng > dag.png
+
+SraRunTable = pd.read_csv("workflow/SraRunTable.csv")
+accessionList = SraRunTable.loc[SraRunTable["Organism"] == config["organism"], "Run"].to_list()
+organismName = config["organism"].replace(" ", "_")
+taxonID = int(SraRunTable["Taxon_ID"].loc[SraRunTable["Organism"] == config["organism"]].head(1))
+genome = SraRunTable["Reference_annotation_used_for_mapping"].loc[SraRunTable["Organism"] == config["organism"]].head(1)
+refGenome = SraRunTable["Reference_annotation_used_for_mapping"].loc[SraRunTable["Organism"] == config["refOrganism"]].head(1)
+
+inputPath = join("input", organismName)
+logPath = join("workflow", "logs", organismName)
+outputPath = join("output", organismName)
+tempPath = join("temp", organismName)
+workflowPath = "workflow/input"
+
+Path(logPath).mkdir(parents = True, exist_ok = True)
+
+dirs = [
+    join(inputPath, "CLEANFASTQ"),
+    join(inputPath, "RAWFASTQ"),
+    join(outputPath, "MULTIQC", "FEATURECOUNTS"),
+    join(outputPath, "FEATURECOUNTS"),
+    join(outputPath, "MULTIQC", "CLEAN"),
+    join(outputPath, "FASTQC", "CLEAN"),
+    join(outputPath, "MULTIQC", "RAW"),
+    join(outputPath, "FASTQC", "RAW"),
+    join(outputPath, "PCA"),
+    join(outputPath, "DEA"),
+    join(outputPath, "WGCNA"),
+    join(outputPath, "TFBS"),
+    join(tempPath, "ALIGNMENT"),
+    join(tempPath, "WGCNA")
+]
+
+for dir in dirs:
+    Path(dir).mkdir(parents = True, exist_ok = True)
+
+idsFile = join(tempPath, "sampleIDs.tsv")
+if not exists(idsFile): 
+    SampleID = []
+    for index, row in SraRunTable.iterrows():
+        if row["root_zone"] == "Root meristematic zone": zone = "MZ"
+        elif row["root_zone"] == "Root differentiation zone": zone = "DZ"
+        elif row["root_zone"] == "Root elongation zone": zone = "EZ"
+        else: zone = "MIXED"
+        SampleID.append("-".join([zone, row["Run"]]))
+    SraRunTable["SampleID"] = SampleID
+    SraRunTable.loc[SraRunTable["Organism"] == config["organism"],["Run", "SampleID"]].to_csv(idsFile, 
+        sep = "\t", header=False, index=False)
+
+
+rule ALL:
+    input:
+        raw_multiqc = join(outputPath, "MULTIQC", "RAW", "multiqc_report.html"),
+        clean_multiqc = join(outputPath, "MULTIQC", "CLEAN", "multiqc_report.html"),
+        alignment_multiqc = join(outputPath, "MULTIQC", "FEATURECOUNTS", "multiqc_report.html"),
+        var = join(outputPath, "PCA", "var.svg"),
+        dendro = join(outputPath, "WGCNA", "dendro.svg")
+
+
+rule FASTERQ_DUMP:
+    input:
+        "workflow/SraRunTable.csv"
+    output:
+        fastq = temporary(expand(join(inputPath, "RAWFASTQ", "{fastqfile}.fastq"), fastqfile = accessionList))
+    params:
+        accessionList = expand("{srr}", srr = accessionList),
+        outdir = directory(join(inputPath, "RAWFASTQ")),
+        threads = config["threads"]
+    log:
+        join(logPath, "sra_download.log")
+    shell:
+        """
+        fasterq-dump --outdir {params.outdir} --threads {params.threads} --verbose --split-files {params.accessionList} &> {log}
+        """
+
+module ALIGNMENT:
+    snakefile:
+        "subworkflows/alignment"
+    config:
+        config
+
+use rule * from ALIGNMENT
+
+rule RLOG_NORMALIZATION:
+    input:
+        sampleIDs = idsFile,
+        counts = expand(join(outputPath, "FEATURECOUNTS", "{genome}.counts.tsv"), genome = genome),
+        gff = expand(join(inputPath, "GENOME", "{genome}.gff3"), genome = genome)
+    output:
+        metadata = join(tempPath, "metadata.tsv"),
+        counts = expand(join(outputPath, "FEATURECOUNTS", "{genome}.gene.counts.tsv"), genome = genome),
+        rpkm = expand(join(outputPath, "FEATURECOUNTS", "{genome}.gene.rpkm.tsv"), genome = genome),
+        rlog = expand(join(outputPath, "FEATURECOUNTS", "{genome}.gene.rlog.tsv"), genome = genome) 
+    log:
+        join(logPath, "parse_featurecounts.log")
+    shell:
+        """
+        Rscript bin/parse.featurecounts.R\
+         --sampleIDs {input.sampleIDs}\
+         --featurecounts {input.counts}\
+         --gff {input.gff}\
+         --metadata {output.metadata}\
+         --counts {output.counts}\
+         --rpkm {output.rpkm}\
+         --rlog {output.rlog} &> {log}
+        """
+
+rule PCA:
+    input:
+        metadata = join(tempPath, "metadata.tsv"),
+        rlog = expand(join(outputPath, "FEATURECOUNTS", "{genome}.gene.rlog.tsv"), genome = genome),
+        term2gene = join(inputPath, "GENOME", "TERM2GENE.tsv"),
+        term2name = "workflow/TERM2NAME.tsv"
+    output:
+        pca = join(outputPath, "PCA", "pca.svg"),
+        var = join(outputPath, "PCA", "var.svg"),
+        biplot = join(outputPath, "PCA", "biplot.svg"),
+        sampleBiplot = expand(join(outputPath, "PCA", "{sampleType}.biplot.svg"), sampleType = config["samples"]),
+        snakemakeReportPCA = report(
+            directory(join(outputPath, "PCA")),
+            patterns = ["{name}.svg"],
+            category="PCA",
+            caption="report/multiqc_featurecounts.rst")
+    params:
+        organism = organismName,
+        outdir = directory(join(outputPath, "PCA")),
+        taxonID = taxonID
+    log:
+        join(logPath, "pca.log")
+    shell:
+        """
+        Rscript bin/pca.R\
+         --metadata {input.metadata}\
+         --rlog {input.rlog}\
+         --organism {params.organism}\
+         --taxon {params.taxonID}\
+         --plots {params.outdir}\
+         --term2gene {input.term2gene}\
+         --term2name {input.term2name} &> {log}
+        """
+
+rule DEA:
+    input:
+        metadata = join(tempPath, "metadata.tsv"),
+        counts = expand(join(outputPath, "FEATURECOUNTS", "{genome}.gene.counts.tsv"), genome = genome),
+        term2gene = join(inputPath, "GENOME", "TERM2GENE.tsv"),
+        term2name = "workflow/TERM2NAME.tsv"
+    output:
+        degs_list = join(outputPath, "DEA", "upregulated.DEGs.txt"),
+        venn = join(outputPath, "DEA","venn.DEGs.svg"),
+        snakemakeReportDEA = report(
+            directory(join(outputPath, "DEA")),
+            patterns = ["{name}.svg"],
+            category="DEA",
+            caption="report/multiqc_featurecounts.rst")
+    params:
+        foldChange = config["foldChange"],
+        outputPath = join(outputPath, "DEA"),
+        organism = config["organism"]
+    log:
+        join(logPath, "dea.log")
+    shell:
+        """
+        Rscript bin/dea.R\
+         --metadata {input.metadata}\
+         --counts {input.counts}\
+         --foldChange {params.foldChange}\
+         --output {params.outputPath}\
+         --organism '{params.organism}'\
+         --term2gene {input.term2gene}\
+         --term2name {input.term2name} &> {log}
+        """
+
+rule WGCNA:
+    input:
+        rlog = expand(join(outputPath, "FEATURECOUNTS", "{genome}.gene.rlog.tsv"), genome = genome),
+        term2gene = join(inputPath, "GENOME", "TERM2GENE.tsv"),
+        term2name = "workflow/TERM2NAME.tsv",
+        degs_list = join(outputPath, "DEA", "upregulated.DEGs.txt")
+    output:
+        dendro = join(outputPath, "WGCNA", "dendro.svg"),
+        #snakemakeReportWGCNA = report(
+        #    directory(join(outputPath, "WGCNA")),
+        #    patterns = ["{name}.svg"],
+        #    category="WGCNA",
+        #    caption="report/multiqc_featurecounts.rst")
+    params:
+        softPower = config["softPower"],
+        outputDir = join(outputPath, "WGCNA"),
+        threads = config["threads"],
+        mergeThreshold = config["mergeThreshold"],
+        forceTOMCalc = config["forceTOMCalc"],
+        tempTOM = directory(join(tempPath, "WGCNA"))
+    log:
+        join(logPath, "wgcna.log")
+    shell:
+        """
+        Rscript bin/wgcna.R\
+         --expression {input.rlog}\
+         --term2gene {input.term2gene}\
+         --term2name {input.term2name}\
+         --threads {params.threads}\
+         --softPower {params.softPower}\
+         --background {input.degs_list}\
+         --output {params.outputDir}\
+         --mergeThreshold {params.mergeThreshold}\
+         --forceTOMCalc {params.forceTOMCalc}\
+         --temp {params.tempTOM} &> {log}
+        """
+
+rule BLAST:
+    input:
+        refFASTA = expand(join("input", "{refOrganism}", "GENOME", "{genome}.protein.fa"), refOrganism = config["refOrganism"].replace(' ','_'), genome = refGenome),
+        queryFASTA = expand(join(inputPath, "GENOME", "{genome}.protein.fa"), genome = genome)
+    output:
+        blast = expand(join(outputPath, "BLASTp", "blastp.{blast}.tsv"), blast = config["blast"]),
+        orthologs = expand(join(outputPath, "BLASTp", "orthologs.{blast}.tsv"), blast = config["blast"])
+    params:
+        threads = config["threads"],
+        blast = config["blast"],
+        outputPath = join(outputPath, "BLASTp")
+    log:
+        join(logPath, "blast.log")
+    shell:
+        """
+        Rscript bin/blastp.R\
+         --subject {input.refFASTA}\
+         --query {input.queryFASTA}\
+         --blast {params.blast}\
+         --output {params.outputPath}\
+         --cores {params.threads} &> {log}
+        """
+
+rule CISBP:
+    input:
+        cisBP = join(workflowPath, "cisbp.json"),
+        rapMSU = join("input", "Oryza_sativa_Japonica_Group", "GENOME", "RAP-MSU.txt"),
+        zeaIDs = join("input", "Zea_mays", "GENOME", "genes_to_alias_ids.tsv")
+    output:
+        join(workflowPath, "PLT-TFs_related.tsv")
+    shell:
+        """
+        python bin/cisbp.py\
+         --cisbpjson {input.cisBP}\
+         --rapmsu {input.rapMSU}\
+         --zeaids {input.zeaIDs}\
+         --output {output}
+        """
+
+rule MOTIFS:
+    input:
+        cisBP = expand(join(inputPath, "GENOME", "{genome}.cisBP.tf"), genome = genome),
+        pltTFs = join(workflowPath, "PLT-TFs_related.tsv"),
+        ref = expand(join("input", "{refOrganism}", "GENOME", "{genome}.cisBP.tf"), refOrganism = config["refOrganism"].replace(' ','_'), genome = refGenome),
+        rapMSU = join("input", "Oryza_sativa_Japonica_Group", "GENOME", "RAP-MSU.txt"),
+        zeaIDs = join("input", "Zea_mays", "GENOME", "genes_to_alias_ids.tsv")
+    output:
+        pltMotifs = expand(join(outputPath, "TFBS", "{genome}.PLT.tf"), genome = genome)
+    params:
+        organism = config["organism"],
+        ref = config["refOrganism"],
+        outputDir = join(outputPath, "TFBS")
+    conda:
+        "rsat"
+    shell:
+        """
+        python bin/parse.tfbs.py\
+         --tfs {input.pltTFs}\
+         --transfac {input.cisBP}\
+         --tfsRef {input.ref}\
+         --organism '{params.organism}'\
+         --ref '{params.ref}'\
+         --zeaids {input.zeaIDs}\
+         --rapmsu {input.rapMSU}\
+         --output {output.pltMotifs}\
+         --logos {params.outputDir}
+        """
+
+rule TFBS:
+    input:
+        wgcna = join(outputPath, "WGCNA", "dendro.svg"),
+        motifs = expand(join(outputPath, "TFBS", "{genome}.PLT.tf"), genome = genome)
+    output:
+        join(outputPath, "WGCNA", "turquoise.nodes.ft")
+    params:
+        inputDir = join(outputPath, "WGCNA"),
+        genome = genome
+    conda:
+        "rsat"
+    log:
+        join(logPath, "tfbs.log")
+    shell:
+        """
+        analyze_promoter(){{
+        GENES=$(mktemp)
+        FASTA=$(mktemp)
+        awk '{{ if ($5 == \"TRUE\") {{print $1}} }}' $1 > $GENES
+        echo \"Meristem genes in $1 $(wc -l $GENES)\" >> {log}
+        if [ -n \"$(cat $GENES)\" ]
+        then
+        echo \"Retrieving promoter sequences of file $GENES and saving in $FASTA \" >> {log}
+        rsat retrieve-seq\
+         -org {organismName}\
+         -feattype gene\
+         -type upstream\
+         -format fasta\
+         -label id\
+         -noorf\
+         -i $GENES\
+         -o $FASTA
+        echo \"Scanning motifs in promoters of file $FASTA \" >> {log}
+        rsat matrix-scan\
+         -v 1\
+         -matrix_format transfac\
+         -m {input.motifs}\
+         -pseudo 1\
+         -decimals 1\
+         -2str\
+         -origin end\
+         -bgfile $CONDA_PREFIX/share/rsat/public_html/data/genomes/{organismName}/oligo-frequencies/2nt_upstream-noorf_{organismName}-ovlp-1str.freq.gz\
+         -bg_pseudo 0.01\
+         -return sites\
+         -lth score 1\
+         -uth pval 1e-4\
+         -i $FASTA\
+         -seq_format fasta\
+         -n score\
+         -o \"${{1/tsv/\"ft\"}}\"
+        else
+        echo > \"${{1/tsv/\"ft\"}}\"
+        fi
+        }}
+        echo \"Performing TFBSs analsys over files:\" > {log}
+        for file in {params.inputDir}/*.nodes.tsv
+        do
+        analyze_promoter $file &
+        done 
+        wait
+        """
+
+rule TFBS_COMPENDIUM:
+    input:
+        query = "output/Arabidopsis_thaliana/PLTs/mz.upregulated.degs.plt_regulated.txt",
+        tfs = "output/Arabidopsis_thaliana/TFBS/TAIR10.PLT.tf"
+    output:
+        "output/Arabidopsis_thaliana/PLTs/mz.upregulated.degs.plt_regulated.ft"
+    params:
+        organism = organismName
+    conda:
+        "rsat"
+    log:
+        join(logPath, "tfbs_compendium.log")
+    shell:
+        """
+        FASTA=$(mktemp)
+        echo \"Saving fasta sequences in file:\" $FASTA > {log}
+        rsat retrieve-seq\
+        -org {params.organism}\
+        -feattype gene\
+        -type upstream\
+        -format fasta\
+        -label id\
+        -noorf\
+        -ids_only\
+        -i {input.query}\
+        -o $FASTA
+        rsat matrix-scan\
+        -v 1\
+        -matrix_format transfac\
+        -m {input.tfs}\
+        -pseudo 1\
+        -decimals 1\
+        -2str\
+        -origin end\
+        -bgfile $CONDA_PREFIX/share/rsat/public_html/data/genomes/{params.organism}/oligo-frequencies/2nt_upstream-noorf_{params.organism}-ovlp-1str.freq.gz\
+        -bg_pseudo 0.01\
+        -return sites\
+        -lth score 1\
+        -uth pval 1e-4\
+        -i $FASTA\
+        -seq_format fasta\
+        -n score\
+        -o {output}
+        """

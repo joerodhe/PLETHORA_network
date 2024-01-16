@@ -1,0 +1,11 @@
+*.RData
+*.log
+*.RDS
+*.Rmd
+*.Rproj
+*.DS_Store
+input/*
+others/*
+output/*
+temp/*
+.snakemake/*
