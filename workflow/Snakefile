@@ -1,0 +1,629 @@
+#snakemake --forceall --rulegraph | dot -Tpng > dag.png
+
+configfile: "workflow/config.yaml"
+
+import pandas as pd
+from os.path import join
+from pathlib import Path
+from os.path import exists
+from os import listdir
+
+def expOrg(pathlist,inter,acclist,format):
+    res = [expand(join("{path}", "{inter}", "{acc}{format}"), path=path,inter=inter,acc=acc,format=format) for path,acc in zip(pathlist,acclist)]
+    res = [j for i in res for j in i]
+    return res
+
+SraRunTable = pd.read_csv("workflow/SraRunTable.csv")
+SraRunTable = SraRunTable.iloc[[org in config["organisms"] for org in SraRunTable.Organism]]
+accessionList = [SraRunTable.Run.loc[SraRunTable.Organism == org].to_list() for org in config["organisms"]]
+organismNames = [org.replace(" ", "_") for org in config["organisms"]]
+taxonIDs = [int(tax) for tax in set(SraRunTable.Taxon_ID)]
+genomes = [genome for genome in set(SraRunTable.Reference_annotation_used_for_mapping)]
+genomes = [SraRunTable.Reference_annotation_used_for_mapping.loc[SraRunTable.Organism == org].values[0] for org in config["organisms"]]
+refGenome = SraRunTable.Reference_annotation_used_for_mapping.loc[SraRunTable.Organism == config["refOrganism"]].head(1)
+refOrganismName = config["refOrganism"].replace(" ", "_")
+
+inputPaths = expand(join("input", "{organismName}"), organismName = organismNames)
+logPaths = expand(join("workflow", "logs", "{organismName}"), organismName = organismNames)
+outputPaths = expand(join("output", "{organismName}"), organismName = organismNames)
+tempPaths = expand(join("temp", "{organismName}"), organismName = organismNames)
+workflowPath = "workflow/input"
+
+Path(join("output", "interspecie")).mkdir(parents = True, exist_ok = True)
+
+for logPath in logPaths:
+    Path(logPath).mkdir(parents = True, exist_ok = True)
+
+dirs = [
+    expand(join("{inputPaths}", "CLEANFASTQ"), inputPaths = inputPaths),
+    expand(join("{inputPaths}", "RAWFASTQ"), inputPaths = inputPaths),
+    expand(join("{outputPaths}", "MULTIQC", "FEATURECOUNTS"), outputPaths = outputPaths),
+    expand(join("{outputPaths}", "FEATURECOUNTS"), outputPaths = outputPaths),
+    expand(join("{outputPaths}", "MULTIQC", "CLEAN"), outputPaths = outputPaths),
+    expand(join("{outputPaths}", "FASTQC", "CLEAN"), outputPaths = outputPaths),
+    expand(join("{outputPaths}", "MULTIQC", "RAW"), outputPaths = outputPaths),
+    expand(join("{outputPaths}", "FASTQC", "RAW"), outputPaths = outputPaths),
+    expand(join("{outputPaths}", "PCA"), outputPaths = outputPaths),
+    expand(join("{outputPaths}", "DEA"), outputPaths = outputPaths),
+    expand(join("{outputPaths}", "WGCNA"), outputPaths = outputPaths),
+    expand(join("{outputPaths}", "TFBS"), outputPaths = outputPaths),
+    expand(join("{outputPaths}", "PLTs"), outputPaths = outputPaths),
+    expand(join("{tempPaths}", "ALIGNMENT"), tempPaths = tempPaths),
+    expand(join("{tempPaths}", "WGCNA"), tempPaths = tempPaths)
+]
+
+for dirOrg in dirs:
+    for dir in dirOrg:
+        Path(dir).mkdir(parents = True, exist_ok = True)
+
+idsFiles = expand(join("{tempPaths}", "sampleIDs.tsv"), tempPaths = tempPaths)
+for idsFile, organismName in zip(idsFiles, config["organisms"]):
+    if not exists(idsFile): 
+        SampleID = []
+        for index, row in SraRunTable.iterrows():
+            if row["root_zone"] == "Root meristematic zone": zone = "MZ"
+            elif row["root_zone"] == "Root differentiation zone": zone = "DZ"
+            elif row["root_zone"] == "Root elongation zone": zone = "EZ"
+            else: zone = "MIXED"
+            SampleID.append("-".join([zone, row["Run"]]))
+        SraRunTable.SampleID = SampleID
+        SraRunTable.loc[SraRunTable.Organism == organismName,["Run", "SampleID"]].to_csv(idsFile, 
+            sep = "\t", header=False, index=False)
+
+rule ALL:
+    input:
+        reportALIGNMENT = report(
+            expand(join("{outputPaths}", "MULTIQC", "FEATURECOUNTS", "multiqc_report.html"), outputPaths = outputPaths),
+            category="Gene quantification",
+            caption="report/multiqc_featurecounts.rst"),
+        reportCLEAN = report(
+            expand(join("{outputPaths}", "MULTIQC", "CLEAN", "multiqc_report.html"), outputPaths = outputPaths),
+            category="Clean reads quality report",
+            caption="report/multiqc_fastqc.rst"),
+        reportRAW = report(
+            expand(join("{outputPaths}", "MULTIQC", "RAW", "multiqc_report.html"), outputPaths = outputPaths),
+            category="Raw reads quality report",
+            caption="report/multiqc_fastqc.rst"),
+        reportNET = report(
+            directory(expand(join("output", "{ref}", "NETWORK"), ref=refOrganismName)),
+            patterns = ["{name}.svg"],
+            category = "Curated Arabidopsis PLT-driven GRN"
+        )
+        
+
+rule FASTERQ_DUMP:
+    input:
+        "workflow/SraRunTable.csv"
+    output:
+        fastq = expOrg(inputPaths, "RAWFASTQ", accessionList, ".fastq")
+    params:
+        threads = config["threads"],
+        nOrg = len(config["organisms"])
+    #conda:
+    #    "sratools"
+    shell:
+        """
+        inputPaths=({inputPaths})
+        echo {accessionList}
+        echo "${{accessionList[@]}}"
+        acl=($(echo {accessionList} | tr '[]' '"' | tr -d ','))
+        echo "${{acl[@]}}"
+        echo "${{#acl[@]}}"
+        #logPaths=({logPaths})
+        #for ((i=0; i<{params.nOrg}; i++))
+        #do
+        #outputPath=${{inputPaths[$i]}}/RAWFASTQ
+        #logFile=${{logPaths[$i]}}/fasterqdump.log
+        #accList=("${{acl[$i]}}")
+        #echo $i
+        #echo $outputPath
+        #echo $accList
+        #echo $logFile
+        ##fasterq-dump --outdir $outputPath --threads {params.threads} --verbose --split-files $accList &> $logFile
+        #done
+        """
+
+rule CISBP:
+    input:
+        cisBP = join(workflowPath, "cisbp.json"),
+        rapMSU = join("input", "Oryza_sativa_Japonica_Group", "GENOME", "RAP-MSU.txt"),
+        zeaIDs = join("input", "Zea_mays", "GENOME", "genes_to_alias_ids.tsv")
+    output:
+        join(workflowPath, "PLT-TFs_related.tsv")
+    shell:
+        """
+        python bin/cisbp.py\
+         --cisbpjson {input.cisBP}\
+         --rapmsu {input.rapMSU}\
+         --zeaids {input.zeaIDs}\
+         --output {output}
+        """   
+
+rule TRIMMOMATIC:
+    input:
+        fastqFiles = expOrg(inputPaths, "RAWFASTQ", accessionList, ".fastq"),
+        TruSeq3 = join("workflow", "TruSeq3-SE.fa")
+    output:
+        expOrg(inputPaths, "CLEANFASTQ", accessionList, ".fastq")
+    params:
+        threads = config["threads"]
+    run:
+        for accN, accClean in zip(accOrg, accOrgClean):
+            shell(
+                "echo 'trimmomatic SE {accN} {accClean} ILLUMINACLIP:workflow/TruSeq3-SE.fa:2:30:10 LEADING:3 TRAILING:3 SLIDINGWINDOW:4:15 MINLEN:36 -threads {params.threads}'"
+            )
+
+
+rule FASTQC:
+    input:
+        fastqRAW = expOrg(inputPaths, "RAWFASTQ", accessionList, ".fastq"),
+        fastqCLEAN = expOrg(inputPaths, "CLEANFASTQ", accessionList, ".fastq")
+    output:
+        reportRAW = expOrg(outputPaths, "FASTQC/RAW", accessionList, "_fastqc.html"),
+        reportCLEAN = expOrg(outputPaths, "FASTQC/CLEAN", accessionList, "_fastqc.html"),
+        zipReportRAW = expOrg(outputPaths, "FASTQC/RAW", accessionList, "_fastqc.zip"),
+        zipReportCLEAN = expOrg(outputPaths, "FASTQC/CLEAN", accessionList, "_fastqc.zip")
+    params:
+        threads = config["threads"]
+    run:
+        for inputPath,outputPath,logPaths in zip(inputPaths,outputPaths,logPaths):
+            inputdirRAW = join(inputPath, "RAWFASTQ", "*")
+            outdirRAW = join(join(outputPath, "FASTQC", "RAW"))
+            inputdirCLEAN = join(inputPath, "CLEANFASTQ", "*")
+            outdirCLEAN = join(join(outputPath, "FASTQC", "CLEAN"))
+            logFile = join(logPaths, "fastqc.log")
+            shell(
+                "fastqc {inputdirRAW} --threads {params.threads} --outdir {outdirRAW} 2> {logFile}"
+            )
+            shell(
+                "fastqc {inputdirCLEAN} --threads {params.threads} --outdir {outdirCLEAN} 2>> {logFile}"
+            )
+
+
+#rule MULTIQC:
+#    input:
+#        zipReportRAW = expOrg(outputPaths, "FASTQC/RAW", accessionList, "_fastqc.zip"),
+#        zipReportCLEAN = expOrg(outputPaths, "FASTQC/CLEAN", accessionList, "_fastqc.zip"),
+#        accessionIDs = expand(join("{tempPaths}", "sampleIDs.tsv"), tempPaths = tempPaths),
+#        counts = expOrg(outputPaths, "FEATURECOUNTS", genomes, ".counts.tsv")
+#    output:
+#        htmlReportRAW = expand(join("{outputPaths}", "MULTIQC", "RAW", "multiqc_report.html"), outputPaths = outputPaths),
+#        htmlReportCLEAN = expand(join("{outputPaths}", "MULTIQC", "CLEAN", "multiqc_report.html"), outputPaths = outputPaths),
+#        htmlReportALIGNMENT = expand(join("{outputPaths}", "MULTIQC", "FEATURECOUNTS", "multiqc_report.html"), outputPaths = outputPaths)
+#    params:
+#        #organism = config["organism"],
+#        #inputdirRAW = directory(join(outputPath, "FASTQC", "RAW")),
+#        #outdirRAW = directory(join(outputPath, "MULTIQC", "RAW")),
+#        #inputdirCLEAN = directory(join(outputPath, "FASTQC", "CLEAN")),
+#        #outdirCLEAN = directory(join(outputPath, "MULTIQC", "CLEAN")),
+#        #outdirALIGNMENT = join(outputPath, "MULTIQC", "FEATURECOUNTS"),
+#        #indirALIGNMENT = join(outputPath, "FEATURECOUNTS")
+#    log:
+#        #join(logPath, "multiqc.log")
+#    shell:
+#        """
+#        #multiqc {params.inputdirRAW} --outdir {params.outdirRAW} --replace-names {input.accessionIDs} --force 2> {log}
+#        #multiqc {params.inputdirCLEAN} --outdir {params.outdirCLEAN} --replace-names {input.accessionIDs} --force 2>> {log}
+#        #multiqc {params.indirALIGNMENT} --outdir {params.outdirALIGNMENT} --replace-names {input.accessionIDs} --force 2>> {log}
+#        """
+
+
+
+
+rule BOWTIE2_BUILD:
+    input:
+        expOrg(inputPaths, "GENOME", genomes, ".fa")
+    output:
+        expOrg(inputPaths, "GENOME", genomes, ".1.bt2")
+    params:
+        threads = config["threads"]
+    run:
+        for inputfile,outdir,logpath in zip(input, outputPaths, logPaths):
+            logfile = join(logpath, "index_genome.log")
+            shell(
+                "bowtie2-build {inputfile} {outdir} --threads {params.threads} --verbose &>> {logfile}"
+                )
+
+rule BOWTIE2:
+    input:
+        fastqFiles = expOrg(inputPaths, "CLEANFASTQ", accessionList, ".fastq"),
+        bt2 = expOrg(inputPaths, "GENOME", genomes, ".1.bt2")
+    output:
+        expOrg(tempPaths, "ALIGNMENT", accessionList, ".sam")
+    params:
+        threads = config["threads"]
+    run:
+        for genome,inputPath,accList,logPath,tempPath in zip(genomes,inputPaths,accessionList,logPaths,tempPaths):
+            index = join(inputPath, f"{genome}")
+            logFile = join(logPath, "alignment.log")
+            shell("echo Starting alignment... >> {logFile}")
+            for acc in accList:
+                fastq = join(inputPath, "CLEANFASTQ", "{acc}.fastq".format(acc=acc))
+                sam = join(tempPath, "ALIGNMENT", "{acc}.sam".format(acc=acc))
+                shell(
+                    "bowtie2 --threads {params.threads} -x {index} -U {fastq} -S {sam} 2>> {logFile}"
+                )
+
+rule SAMTOOLS:
+    input:
+        expOrg(tempPaths, "ALIGNMENT", accessionList, ".sam")
+    output:
+        expOrg(tempPaths, "ALIGNMENT", accessionList, ".bam")
+    params:
+        threads = config["threads"]
+    run:
+        for accList,tempPath in zip(accessionList,tempPaths):
+            for acc in accList:
+                sam = join(tempPath, "ALIGNMENT", "{acc}.sam".format(acc=acc))
+                bam = join(tempPath, "ALIGNMENT", "{acc}.bam".format(bam=bam))
+                shell(
+                    "samtools view -u {sam} -@ {params.threads} | samtools sort -@ {params.threads} -o {bam}"
+                )
+
+rule GFFREAD:
+    input:
+        expOrg(inputPaths, "GENOME", genomes, ".gff3")
+    output:
+        expOrg(inputPaths, "GENOME", genomes, ".gtf")
+    run:
+        for inputPath,genome in zip(inputPaths, genomes):
+            gff3 = join(inputPath, "GENOME", "{genome}.gff3".format(genome=genome))
+            gtf = join(inputPath, "GENOME", "{genome}.gtf".format(genome=genome))
+            shell(
+                "gffread {gff3} -T -o {gtf}"
+            )
+
+rule FEATURECOUNTS:
+    input:
+        gtf = expOrg(inputPaths, "GENOME", genomes, ".gtf"),
+        bam = expOrg(tempPaths, "ALIGNMENT", accessionList, ".bam")
+    output:
+        counts = expOrg(outputPaths, "FEATURECOUNTS", genomes, ".counts.tsv"),
+        summary = expOrg(outputPaths, "FEATURECOUNTS", genomes, "counts.tsv.summary")
+    params:
+        threads = config["threads"] if config["threads"] <= 64 else 64,
+        feature = config["feature"],
+        attribute = config["attribute"]
+    run:
+        for tempPath,outputPath,inputPath,genome,logPath in zip(tempPaths,outputPaths, inputPaths, genomes, logPaths):
+            gtf = join(inputPath, "GENOME", "{genome}.gtf".format(genome=genome))
+            counts = join(outputPath, "GENOME", "{genome}.counts.tsv".format(genome=genome))
+            bams = join(tempPath, "ALIGNMENT", "*.bam")
+            logFile = join(logPath, "featurecounts.log")
+            shell(
+                "featureCounts -t {params.feature} -g {params.attribute} -T {params.threads} -O -a {gtf} -o {counts} {bams} 2> {logFile}"
+            )
+
+rule RLOG:
+    input:
+        sampleIDs = idsFiles,
+        counts = expOrg(outputPaths, "FEATURECOUNTS", genomes, ".counts.tsv"),
+        gff = expOrg(inputPaths, "GENOME", genomes, ".gff3")
+    output:
+        metadata = expand(join("{tempPath}", "metadata.tsv"), tempPath=tempPaths),
+        counts = expOrg(outputPaths, "FEATURECOUNTS", genomes, ".gene.counts.tsv"),
+        rpkm = expOrg(outputPaths, "FEATURECOUNTS", genomes, ".gene.rpkm.tsv"),
+        rlog = expOrg(outputPaths, "FEATURECOUNTS", genomes, ".gene.rlog.tsv"), 
+    run:
+        for outputPath,inputPath,tempPath,idFile,logPath,genome in zip(outputPaths,inputPaths,tempPaths,idsFiles,logPaths,genomes):
+            lofFile = join(logPath,"parse_featurecounts.log")
+            countsIN = join(outputPath, "FEATURECOUNTS", "{genome}.counts.tsv".format(genome=genome))
+            gff = join(inputPath, "GENOME", "{genome}.gff3".format(genome=genome))
+            metadata = join(tempPath, "metadata.tsv")
+            countsOUT = join(outputPath, "FEATURECOUNTS", "{genome}.gene.counts.tsv".format(genome=genome))
+            rpkm = join(outputPath, "FEATURECOUNTS", "{genome}.gene.rpkm.tsv".format(genome=genome))
+            rlog = join(outputPath, "FEATURECOUNTS", "{genome}.gene.rlog.tsv".format(genome=genome))
+            shell(
+                "Rscript bin/parse.featurecounts.R\
+                --sampleIDs {idFile}\
+                --featurecounts {countsIN}\
+                --gff {gff}\
+                --metadata {metadata}\
+                --counts {countsOUT}\
+                --rpkm {rpkm}\
+                --rlog {rlog} &> {logFile}"
+                )
+
+rule PCA:
+    input:
+        metadata = expand(join("{tempPath}", "metadata.tsv"), tempPath=tempPaths),
+        rlog = expOrg(outputPaths, "FEATURECOUNTS", genomes, ".gene.rlog.tsv"),
+        term2gene = expand(join("{inputPath}", "GENOME", "TERM2GENE.tsv"), inputPath = inputPaths),
+        term2name = "workflow/TERM2NAME.tsv"
+    output:
+        pca = expand(join("{outputPath}", "PCA", "pca.svg"), outputPath=outputPaths),
+        var = expand(join("{outputPath}", "PCA", "var.svg"), outputPath=outputPaths),
+        biplot = expand(join("{outputPath}", "PCA", "biplot.svg"), outputPath=outputPaths),
+        sampleBiplot = expand(join("{outputPath}", "PCA", "{sampleType}.biplot.svg"), outputPath=outputPaths, sampleType = config["samples"]),
+        pcaAll = join("output", "interspecie", "pca.svg")
+    params:
+        rds = ",".join(expand(join("{tempPath}", "pca.RDS"), tempPath = tempPaths)),
+        organisms = ",".join(organismNames)
+    run:
+        for outputPath,inputPath,tempPath,logPath,genome,taxonID,organismName in zip(outputPaths,inputPaths,tempPaths,logPaths,genomes,taxonIDs,organismNames):
+            logFile = join(logPath,"pca.log")
+            metadata = join(tempPath, "metadata.tsv") 
+            rlog = join(outputPath, "FEATURECOUNTS", "{genome}.gene.rlog.tsv".format(genome=genome))
+            outdir = join(outputPath, "PCA") 
+            term2gene = join(inputPath, "GENOME", "TERM2GENE.tsv")
+            shell(
+              "Rscript bin/pca.R\
+              --metadata {metadata}\
+              --rlog {rlog}\
+              --organism {organismName}\
+              --taxon {taxonID}\
+              --plots {outdir}\
+              --tempDir {tempPath}\
+              --term2gene {term2gene}\
+              --term2name {input.term2name} &> {logFile}"
+                )
+        shell(
+            "Rscript bin/plot.pca.R\
+             --files {params.rds}\
+             --organisms {params.organisms}\
+             --plot {output.pcaAll}"
+        )
+
+
+rule DEA:
+    input:
+        metadata = expand(join("{tempPath}", "metadata.tsv"), tempPath=tempPaths),
+        counts = expOrg(outputPaths, "FEATURECOUNTS", genomes, ".counts.tsv"),
+        term2gene = expand(join("{inputPath}", "GENOME", "TERM2GENE.tsv"), inputPath = inputPaths),
+        term2name = "workflow/TERM2NAME.tsv",
+        plts = "others/plt.ids.txt"
+    output:
+        degs_list = expand(join("{outputPath}", "DEA", "upregulated.MZ.DEGs.txt"), outputPath=outputPaths),
+        venn = expand(join("{outputPath}", "DEA","venn.MZ.DEGs.svg"), outputPath=outputPaths)
+    params:
+        foldChange = config["foldChange"],
+        organisms = config["organisms"]
+    run:
+        for outputPath,inputPath,tempPath,logPath,genome,organism in zip(outputPaths,inputPaths,tempPaths,logPaths,genomes,params.organisms):
+            logFile = join(logPath,"dea.log")
+            metadata = join(tempPath, "metadata.tsv") 
+            counts = join(outputPath, "FEATURECOUNTS", "{genome}.gene.counts.tsv".format(genome=genome))
+            outdir = join(outputPath, "DEA")
+            term2gene = join(inputPath, "GENOME", "TERM2GENE.tsv")
+            shell(
+                "Rscript bin/dea.R\
+                --metadata '{metadata}'\
+                --counts '{counts}'\
+                --foldChange {params.foldChange}\
+                --output '{outdir}'\
+                --organism '{organism}'\
+                --plts '{input.plts}'\
+                --term2gene '{term2gene}'\
+                --term2name '{input.term2name}' &> '{logFile}'"
+                )
+
+rule PLT_COMPENDIUM:
+    input:
+        degs_list = expand(join("output", "{ref}", "DEA", "upregulated.DEGs.txt"), ref=refOrganismName),
+        fasta = expand(join("input", "{refOrganism}", "GENOME", "{genome}.protein.fa"), refOrganism = config["refOrganism"].replace(' ','_'), genome = refGenome),
+        compendium = expand(join("input", "{ref}", "PLTs", "TPC2016-00656-RAR2_Supplemental_Data_Set_1.xlsx"), ref=refOrganismName)
+    output:
+        compendium = expand(join("output", "{ref}", "PLTs", "degs.plt.compendium.txt"), ref=refOrganismName),
+        fasta = expand(join("output", "{ref}", "PLTs", "degs.plt.compendium.fa"), ref=refOrganismName)
+    params:
+        compendium = expand(join("output", "{ref}", "PLTs", "degs.plt.compendium.txt"), ref=refOrganismName)
+    shell:
+        """
+        Rscript bin/filter.compendium.R\
+         --compendium {input.compendium}\
+         --degs {input.degs_list}\
+         --fasta {input.fasta}\
+         --output {params.compendium}\
+         --fastaOutput {output.fasta}
+        """
+
+rule BLAST:
+    input:
+        refFASTA = expand(join("input", "{ref}", "GENOME", "{genome}.protein.fa"), ref=refOrganismName, genome = refGenome),
+        queryFASTA = expOrg(inputPaths, "GENOME", genomes, ".protein.fa")
+    output:
+        orthologs = expand(join("{outputPath}", "BLASTp", "orthologs.{blast}.all.tsv"), outputPath = outputPaths, blast = config["blast"]),
+        orthologsAll = expand(join("output", "interspecie", "orthologs.{blast}.all.tsv"), blast = config["blast"])
+    params:
+        threads = config["threads"],
+        blast = config["blast"],
+        force = config["forceBLAST"],
+        organisms = ",".join(organismNames),
+        reference = refOrganismName
+    run:
+        for outputPath,inputPath,logPath,genome,organism in zip(outputPaths,inputPaths,logPaths,genomes, organismNames):
+            queryFASTA = join(inputPath, "GENOME", "{genome}.protein.fa".format(genome=genome))
+            outdir = join(outputPath, "BLASTp")
+            logFile = join(logPath,"blast.log")
+            shell(
+                "Rscript bin/blastp.R\
+                    --subject {input.refFASTA}\
+                    --query {queryFASTA}\
+                    --blast {params.blast}\
+                    --output {outdir}\
+                    --force {params.force}\
+                    --orgSubject {params.reference}\
+                    --orgQuery {organism}\
+                    --cores {params.threads} &> {logFile}" 
+                )
+        orthologs_files = ",".join(output.orthologs)
+        shell(
+          "python bin/parse.blast.py\
+           --organisms {params.organisms}\
+           --files {orthologs_files}\
+           --reference {params.reference}\
+           --output {output.orthologsAll}"
+        )
+
+
+#rule BLAST:
+#    input:
+#        refFASTA = expand(join("output", "{ref}", "PLTs", "degs.plt.compendium.fa"), ref=refOrganismName),
+#        queryFASTA = expOrg(inputPaths, "GENOME", genomes, ".protein.fa")
+#    output:
+#        orthologs = expand(join("{outputPath}", "BLASTp", "orthologs.{blast}.tsv"), outputPath = outputPaths, blast = config["blast"]),
+#        orthologsAll = expand(join("output", "interspecie", "orthologs.{blast}.tsv"), blast = config["blast"]),
+#        compendium = expand(join("{outputPath}", "PLTs", "degs.plt.compendium.txt"), outputPath = outputPaths)
+#    params:
+#        threads = config["threads"],
+#        blast = config["blast"],
+#        force = config["forceBLAST"],
+#        organisms = ",".join(organismNames),
+#        reference = refOrganismName
+#    run:
+#        for outputPath,inputPath,logPath,genome,organism in zip(outputPaths,inputPaths,logPaths,genomes, organismNames):
+#            queryFASTA = join(inputPath, "GENOME", "{genome}.protein.fa".format(genome=genome))
+#            outdir = join(outputPath, "BLASTp")
+#            logFile = join(logPath,"blast.log")
+#            shell(
+#                "Rscript bin/blastp.R\
+#                    --subject {input.refFASTA}\
+#                    --query {queryFASTA}\
+#                    --blast {params.blast}\
+#                    --output {outdir}\
+#                    --force {params.force}\
+#                    --orgSubject {params.reference}\
+#                    --orgQuery {organism}\
+#                    --cores {params.threads} &> {logFile}" 
+#                )
+#        orthologs_files = ",".join(output.orthologs)
+#        shell(
+#          "python bin/parse.blast.py\
+#           --organisms {params.organisms}\
+#           --files {orthologs_files}\
+#           --reference {params.reference}\
+#           --output {output.orthologsAll}"
+#        )
+              
+
+rule PLT_TFBS:
+    input:
+        cisBP = expOrg(inputPaths, "GENOME", genomes, ".cisBP.tf"),
+        pltTFs = join(workflowPath, "PLT-TFs_related.tsv"),
+        ref = expand(join("input", "{refOrganism}", "GENOME", "{genome}.cisBP.tf"), refOrganism = config["refOrganism"].replace(' ','_'), genome = refGenome),
+        rapMSU = join("input", "Oryza_sativa_Japonica_Group", "GENOME", "RAP-MSU.txt"),
+        zeaIDs = join("input", "Zea_mays", "GENOME", "genes_to_alias_ids.tsv")
+    output:
+        pltMotifs = expOrg(outputPaths, "TFBS", genomes, ".PLT.tf")
+    params:
+        ref = refOrganismName,
+        nOrg = len(config["organisms"]),
+        organisms = config["organisms"]
+    conda:
+        "rsat"
+    shell:
+      """
+      inputPaths=({inputPaths})
+      outputPaths=({outputPaths})
+      genomes=({genomes})
+      organisms=({organismNames})
+      for ((i=0; i<{params.nOrg}; i++))
+      do
+        cisBP=${{inputPaths[$i]}}/GENOME/${{genomes[$i]}}.cisBP.tf
+        pltMotifs=${{outputPaths[$i]}}/TFBS/${{genomes[$i]}}.PLT.tf
+        outdir=${{outputPaths[$i]}}/TFBS
+        organism=${{organisms[$i]}}
+        python bin/parse.tfbs.py\
+        --tfs {input.pltTFs}\
+        --transfac $cisBP\
+        --tfsRef {input.ref}\
+        --organism $organism\
+        --ref '{params.ref}'\
+        --zeaids {input.zeaIDs}\
+        --rapmsu {input.rapMSU}\
+        --output $pltMotifs\
+        --logos $outdir
+      done
+      """
+
+
+rule SCAN_PROMOTER:
+    input:
+        motifs = expOrg(outputPaths, "TFBS", genomes, ".PLT.tf"),
+        compendium = expand(join("{outputPath}", "PLTs", "degs.plt.compendium.txt"), outputPath = outputPaths)
+    output:
+        expand(join("{outputPath}", "PLTs", "degs.plt.compendium.ft"), outputPath=outputPaths)
+    params:
+        nOrg = len(config["organisms"])
+    conda:
+        "rsat"
+    shell:
+        """
+        analyze_promoter(){{
+        FASTA=$(mktemp)
+        if [ -n \"$(cat $1)\" ]
+        then
+        echo \"Working on organism: $3\" >> $4
+        echo \"Retrieving promoter sequences of file $1 and saving in $FASTA \" >> $4
+        rsat retrieve-seq\
+        -org $3\
+        -feattype gene\
+        -type upstream\
+        -format fasta\
+        -label id\
+        -noorf\
+        -i $1\
+        -o $FASTA
+        echo \"Scanning motifs in promoters of file $FASTA \" >> $4
+        rsat matrix-scan\
+        -v 1\
+        -matrix_format transfac\
+        -m $2\
+        -pseudo 1\
+        -decimals 1\
+        -2str\
+        -origin end\
+        -bgfile $CONDA_PREFIX/share/rsat/public_html/data/genomes/${{3}}/oligo-frequencies/2nt_upstream-noorf_${{3}}-ovlp-1str.freq.gz\
+        -bg_pseudo 0.01\
+        -return sites\
+        -lth score 1\
+        -uth pval 1e-4\
+        -i $FASTA\
+        -seq_format fasta\
+        -n score\
+        -o \"${{1/txt/\"ft\"}}\"
+        else
+        echo > \"${{1/txt/\"ft\"}}\"
+        fi
+        }}
+        outputPaths=({outputPaths})
+        genomes=({genomes})
+        organisms=({organismNames})
+        logPaths=({logPaths})
+        for ((i=0; i<{params.nOrg}; i++))
+        do
+        pltMotifs=${{outputPaths[$i]}}/TFBS/${{genomes[$i]}}.PLT.tf
+        genes=${{outputPaths[$i]}}/PLTs/degs.plt.compendium.txt
+        log=${{logPaths[$i]}}/scan_promoter.log
+        organism=${{organisms[$i]}}
+        echo \"Performing TFBSs analysis over file: $genes and $pltMotifs\" > $log
+        analyze_promoter $genes $pltMotifs $organism $log &
+        done
+        wait
+        """
+
+rule BUILD_NETWORK:
+    input:
+        compendium = expand(join("input", "{ref}", "PLTs", "TPC2016-00656-RAR2_Supplemental_Data_Set_1.xlsx"), ref=refOrganismName),
+        degs_list = expand(join("output", "{ref}", "DEA", "upregulated.DEGs.txt"), ref=refOrganismName),
+        degs_plt_tfbs = expand(join("output", "{ref}", "PLTs", "degs.plt.compendium.ft"), ref=refOrganismName),
+        plts_ids = expand(join("input", "{ref}", "PLTs", "plt.ids.txt"), ref=refOrganismName),
+        tfs = expand(join("input", "{ref}", "GENOME", "TAIR10.TF_list.txt"), ref=refOrganismName)
+    output:
+        edges = expand(join("output", "{ref}", "NETWORK", "edges.csv"), ref=refOrganismName),
+        nodes = expand(join("output", "{ref}", "NETWORK", "nodes.csv"), ref=refOrganismName),
+        enrichment = expand(join("output", "{ref}", "NETWORK", "ntw.ora.svg"), ref=refOrganismName)
+    params:
+        plots = expand(join("output", "{ref}", "NETWORK"), ref=refOrganismName)
+    shell:
+        """
+        Rscript bin/plt.compendium.R\
+         --compendium {input.compendium}\
+         --degs {input.degs_list}\
+         --tfbs {input.degs_plt_tfbs}\
+         --plts {input.plts_ids}\
+         --tfs {input.tfs}\
+         --edges {output.edges}\
+         --nodes {output.nodes}\
+         --plots {params.plots}
+        """

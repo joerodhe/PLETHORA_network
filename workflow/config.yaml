@@ -1,0 +1,22 @@
+organisms: [
+  Arabidopsis thaliana,
+  Solanum lycopersicum,
+  Cucumis sativus,
+  Oryza sativa Japonica Group,
+  Glycine max,
+  Zea mays
+]
+refOrganism: Arabidopsis thaliana
+samples: [MZ,DZ,EZ]
+refGenes: [AT3G20840,AT1G51190,AT5G10510,AT5G17430,AT5G57390,AT5G65510]
+feature: exon #exon or transcript (exon by default)
+attribute: gene_id #gene_id or transcript_id (transcript_id by default)
+foldChange: 1
+softPower: 11
+mergeThreshold: 0.25 #MEDissThres threshold to merge WGCNA modules (eigengenes)
+forceTOMCalc: False #Force re-run TOM calculation
+forceBLAST: True #Force re-run BLAST
+gmmThreshold: 0.5
+blast: bbh #best or bbh
+threads: 3
+removeTempFiles: False #Clean fastq files, bam files and WGCNA data

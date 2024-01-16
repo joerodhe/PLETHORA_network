@@ -1,0 +1,10 @@
+temp/*
+output/*
+*.fa
+*.fastq
+*.transfac
+.snakemake/*
+*.tf
+*.xlxs
+*.gff3
+*.log

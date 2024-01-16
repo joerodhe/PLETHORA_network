@@ -1,0 +1,196 @@
+import pandas as pd
+from os.path import join
+from pathlib import Path
+from os.path import exists
+from os import listdir
+
+# To obtain a diagram plot: snakemake --forceall --rulegraph | dot -Tpng > dag.png
+
+def expOrg(pathlist,inter,acclist,format):
+    res = [expand(join("{path}", "{inter}", "{acc}{format}"), path=path,inter=inter,acc=acc,format=format) for path,acc in zip(pathlist,acclist)]
+    res = [j for i in res for j in i]
+    return res
+
+SraRunTable = pd.read_csv("workflow/SraRunTable.csv")
+SraRunTable = SraRunTable.iloc[[org in config["organisms"] for org in SraRunTable.Organism]]
+accessionList = [SraRunTable.Run.loc[SraRunTable.Organism == org].to_list() for org in config["organisms"]]
+organismNames = [org.replace(" ", "_") for org in config["organisms"]]
+taxonIDs = [int(tax) for tax in set(SraRunTable.Taxon_ID)]
+genomes = [genome for genome in set(SraRunTable.Reference_annotation_used_for_mapping)]
+genomes = [SraRunTable.Reference_annotation_used_for_mapping.loc[SraRunTable.Organism == org].head(1) for org in config["organisms"]]
+refGenome = SraRunTable.Reference_annotation_used_for_mapping.loc[SraRunTable.Organism == config["refOrganism"]].head(1)
+
+inputPaths = expand(join("input", "{organismName}"), organismName = organismNames)
+logPaths = expand(join("workflow", "logs", "{organismName}"), organismName = organismNames)
+outputPaths = expand(join("output", "{organismName}"), organismName = organismNames)
+tempPaths = expand(join("temp", "{organismName}"), organismName = organismNames)
+workflowPath = "workflow/input"
+
+idsFiles = expand(join("{tempPaths}", "sampleIDs.tsv"), tempPaths = tempPaths)
+for idsFile, organismName in zip(idsFiles, config["organisms"]):
+    if not exists(idsFile): 
+        SampleID = []
+        for index, row in SraRunTable.iterrows():
+            if row["root_zone"] == "Root meristematic zone": zone = "MZ"
+            elif row["root_zone"] == "Root differentiation zone": zone = "DZ"
+            elif row["root_zone"] == "Root elongation zone": zone = "EZ"
+            else: zone = "MIXED"
+            SampleID.append("-".join([zone, row["Run"]]))
+        SraRunTable.SampleID = SampleID
+#rule ALL:
+#    input:
+#        raw_multiqc = join(outputPath, "MULTIQC", "RAW", "multiqc_report.html"),
+#        clean_multiqc = join(outputPath, "MULTIQC", "CLEAN", "multiqc_report.html"),
+#        alignment_multiqc = join(outputPath, "MULTIQC", "FEATURECOUNTS", "multiqc_report.html"),
+#        var = join(outputPath, "PCA", "var.svg"),
+#        venn = join(outputPath, "DEA","venn.DEGs.svg"),
+#        orthologs = expand(join(outputPath, "BLASTp", "orthologs.{blast}.tsv"), blast = config["blast"])
+#        #dendro = join(outputPath, "WGCNA", "dendro.svg")
+  
+
+#rule WGCNA:
+#    input:
+#        rlog = expand(join(outputPath, "FEATURECOUNTS", "{genome}.gene.rlog.tsv"), genome = genome),
+#        term2gene = join(inputPath, "GENOME", "TERM2GENE.tsv"),
+#        term2name = "workflow/TERM2NAME.tsv",
+#        degs_list = join(outputPath, "DEA", "upregulated.DEGs.txt")
+#    output:
+#        dendro = join(outputPath, "WGCNA", "dendro.svg"),
+#        #snakemakeReportWGCNA = report(
+#        #    directory(join(outputPath, "WGCNA")),
+#        #    patterns = ["{name}.svg"],
+#        #    category="WGCNA",
+#        #    caption="report/multiqc_featurecounts.rst")
+#    params:
+#        softPower = config["softPower"],
+#        outputDir = join(outputPath, "WGCNA"),
+#        threads = config["threads"],
+#        mergeThreshold = config["mergeThreshold"],
+#        forceTOMCalc = config["forceTOMCalc"],
+#        tempTOM = directory(join(tempPath, "WGCNA"))
+#    log:
+#        join(logPath, "wgcna.log")
+#    shell:
+#        """
+#        Rscript bin/wgcna.R\
+#         --expression {input.rlog}\
+#         --term2gene {input.term2gene}\
+#         --term2name {input.term2name}\
+#         --threads {params.threads}\
+#         --softPower {params.softPower}\
+#         --background {input.degs_list}\
+#         --output {params.outputDir}\
+#         --mergeThreshold {params.mergeThreshold}\
+#         --forceTOMCalc {params.forceTOMCalc}\
+#         --temp {params.tempTOM} &> {log}
+#        """
+#
+
+#
+#rule TFBS:
+#    input:
+#        wgcna = join(outputPath, "WGCNA", "dendro.svg"),
+#        motifs = expand(join(outputPath, "TFBS", "{genome}.PLT.tf"), genome = genome)
+#    output:
+#        join(outputPath, "WGCNA", "turquoise.nodes.ft")
+#    params:
+#        inputDir = join(outputPath, "WGCNA"),
+#        genome = genome
+#    conda:
+#        "rsat"
+#    log:
+#        join(logPath, "tfbs.log")
+#    shell:
+#        """
+#        analyze_promoter(){{
+#        GENES=$(mktemp)
+#        FASTA=$(mktemp)
+#        awk '{{ if ($5 == \"TRUE\") {{print $1}} }}' $1 > $GENES
+#        echo \"Meristem genes in $1 $(wc -l $GENES)\" >> {log}
+#        if [ -n \"$(cat $GENES)\" ]
+#        then
+#        echo \"Retrieving promoter sequences of file $GENES and saving in $FASTA \" >> {log}
+#        rsat retrieve-seq\
+#         -org {organismName}\
+#         -feattype gene\
+#         -type upstream\
+#         -format fasta\
+#         -label id\
+#         -noorf\
+#         -i $GENES\
+#         -o $FASTA
+#        echo \"Scanning motifs in promoters of file $FASTA \" >> {log}
+#        rsat matrix-scan\
+#         -v 1\
+#         -matrix_format transfac\
+#         -m {input.motifs}\
+#         -pseudo 1\
+#         -decimals 1\
+#         -2str\
+#         -origin end\
+#         -bgfile $CONDA_PREFIX/share/rsat/public_html/data/genomes/{organismName}/oligo-frequencies/2nt_upstream-noorf_{organismName}-ovlp-1str.freq.gz\
+#         -bg_pseudo 0.01\
+#         -return sites\
+#         -lth score 1\
+#         -uth pval 1e-4\
+#         -i $FASTA\
+#         -seq_format fasta\
+#         -n score\
+#         -o \"${{1/tsv/\"ft\"}}\"
+#        else
+#        echo > \"${{1/tsv/\"ft\"}}\"
+#        fi
+#        }}
+#        echo \"Performing TFBSs analsys over files:\" > {log}
+#        for file in {params.inputDir}/*.nodes.tsv
+#        do
+#        analyze_promoter $file &
+#        done 
+#        wait
+#        """
+#
+#rule TFBS_COMPENDIUM:
+#    input:
+#        query = "output/Arabidopsis_thaliana/PLTs/mz.upregulated.degs.plt_regulated.txt",
+#        tfs = "output/Arabidopsis_thaliana/TFBS/TAIR10.PLT.tf"
+#    output:
+#        "output/Arabidopsis_thaliana/PLTs/mz.upregulated.degs.plt_regulated.ft"
+#    params:
+#        organism = organismName
+#    conda:
+#        "rsat"
+#    log:
+#        join(logPath, "tfbs_compendium.log")
+#    shell:
+#        """
+#        FASTA=$(mktemp)
+#        echo \"Saving fasta sequences in file:\" $FASTA > {log}
+#        rsat retrieve-seq\
+#        -org {params.organism}\
+#        -feattype gene\
+#        -type upstream\
+#        -format fasta\
+#        -label id\
+#        -noorf\
+#        -ids_only\
+#        -i {input.query}\
+#        -o $FASTA
+#        rsat matrix-scan\
+#        -v 1\
+#        -matrix_format transfac\
+#        -m {input.tfs}\
+#        -pseudo 1\
+#        -decimals 1\
+#        -2str\
+#        -origin end\
+#        -bgfile $CONDA_PREFIX/share/rsat/public_html/data/genomes/{params.organism}/oligo-frequencies/2nt_upstream-noorf_{params.organism}-ovlp-1str.freq.gz\
+#        -bg_pseudo 0.01\
+#        -return sites\
+#        -lth score 1\
+#        -uth pval 1e-4\
+#        -i $FASTA\
+#        -seq_format fasta\
+#        -n score\
+#        -o {output}
+#        """
+#
