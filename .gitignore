@@ -1,10 +1,11 @@
 temp/*
 output/*
 input/*
+.snakemake/*
+.vscode/*
 ._*
 *.fastq
 *.transfac
-.snakemake/*
 *.tf
 *.xlxs
 *.gff3
