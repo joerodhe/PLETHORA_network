@@ -1,0 +1,204 @@
+import pandas as pd
+from os.path import join
+from pathlib import Path
+from os.path import exists
+from os import listdir
+
+SraRunTable = pd.read_csv("workflow/SraRunTable.csv")
+accessionList = SraRunTable.loc[SraRunTable["Organism"] == config["organism"], "Run"].to_list()
+organismName = config["organism"].replace(" ", "_")
+taxonID = int(SraRunTable["Taxon_ID"].loc[SraRunTable["Organism"] == config["organism"]].head(1))
+genome = SraRunTable["Reference_annotation_used_for_mapping"].loc[SraRunTable["Organism"] == config["organism"]].head(1)
+refGenome = SraRunTable["Reference_annotation_used_for_mapping"].loc[SraRunTable["Organism"] == config["refOrganism"]].head(1)
+
+inputPath = join("input", organismName)
+logPath = join("workflow", "logs", organismName)
+outputPath = join("output", organismName)
+tempPath = join("temp", organismName)
+
+
+rule FASTQC:
+    input:
+        fastqRAW = expand(join(inputPath, "RAWFASTQ", "{fastqfile}.fastq"), fastqfile = accessionList),
+        fastqCLEAN = expand(join(inputPath, "CLEANFASTQ", "{fastqfile}.fastq"), fastqfile = accessionList)
+    output:
+        htmlReportRAW = expand(join(outputPath, "FASTQC", "RAW", "{fastqfile}_fastqc.html"), fastqfile = accessionList),
+        zipReportRAW = temporary(expand(join(outputPath, "FASTQC", "RAW", "{fastqfile}_fastqc.zip"), fastqfile = accessionList)),
+        htmlReportCLEAN = expand(join(outputPath, "FASTQC", "CLEAN", "{fastqfile}_fastqc.html"), fastqfile = accessionList),
+        zipReportCLEAN = temporary(expand(join(outputPath, "FASTQC", "CLEAN", "{fastqfile}_fastqc.zip"), fastqfile = accessionList))
+    params:
+        threads = config["threads"],
+        outdirRAW = directory(join(outputPath, "FASTQC", "RAW")),
+        inputdirRAW = directory(join(inputPath, "RAWFASTQ", "*")),
+        outdirCLEAN = directory(join(outputPath, "FASTQC", "CLEAN")),
+        inputdirCLEAN = directory(join(inputPath, "CLEANFASTQ", "*"))
+    log:
+        join(logPath, "fastqc.log")
+    shell:
+        """
+        fastqc {params.inputdirRAW} --threads {params.threads} --outdir {params.outdirRAW} 2> {log}
+        fastqc {params.inputdirCLEAN} --threads {params.threads} --outdir {params.outdirCLEAN} 2>> {log}
+        """
+
+rule MULTIQC:
+    input:
+        fastqcRAW = expand(join(outputPath, "FASTQC", "RAW", "{fastqfile}_fastqc.zip"), fastqfile = accessionList),
+        fastqcCLEAN = expand(join(outputPath, "FASTQC", "CLEAN", "{fastqfile}_fastqc.zip"), fastqfile = accessionList),
+        accessionIDs = join(tempPath, "sampleIDs.tsv"),
+        counts = expand(join(outputPath, "FEATURECOUNTS", "{genome}.counts.tsv"), genome = genome)
+    output:
+        htmlReportRAW = join(outputPath, "MULTIQC", "RAW", "multiqc_report.html"),
+        dirReportRAW = temporary(directory(join(outputPath, "MULTIQC", "RAW", "multiqc_data"))),
+        htmlReportCLEAN = join(outputPath, "MULTIQC", "CLEAN", "multiqc_report.html"),
+        dirReportCLEAN = temporary(directory(join(outputPath, "MULTIQC", "CLEAN", "multiqc_data"))),
+        htmlReportALIGNMENT = join(outputPath, "MULTIQC", "FEATURECOUNTS", "multiqc_report.html"),
+        dirReportALIGNMENT = temporary(directory(join(outputPath, "MULTIQC", "FEATURECOUNTS", "multiqc_data"))),
+        snakemakeReportALIGNMENT = report(
+            directory(join(outputPath, "MULTIQC", "FEATURECOUNTS")),
+            htmlindex="multiqc_report.html",
+            category="Gene quantification",
+            caption="report/multiqc_featurecounts.rst"),
+        snakemakeReportCLEAN = report(
+            directory(join(outputPath, "MULTIQC", "CLEAN")),
+            htmlindex="multiqc_report.html",
+            category="Clean reads quality report",
+            caption="report/multiqc_fastqc.rst"),
+        snakemakeReportRAW = report(
+            directory(join(outputPath, "MULTIQC", "RAW")),
+            htmlindex="multiqc_report.html",
+            category="Raw reads quality report",
+            caption="report/multiqc_fastqc.rst")
+    params:
+        organism = config["organism"],
+        inputdirRAW = directory(join(outputPath, "FASTQC", "RAW")),
+        outdirRAW = directory(join(outputPath, "MULTIQC", "RAW")),
+        inputdirCLEAN = directory(join(outputPath, "FASTQC", "CLEAN")),
+        outdirCLEAN = directory(join(outputPath, "MULTIQC", "CLEAN")),
+        outdirALIGNMENT = join(outputPath, "MULTIQC", "FEATURECOUNTS"),
+        indirALIGNMENT = join(outputPath, "FEATURECOUNTS")
+    log:
+        join(logPath, "multiqc.log")
+    shell:
+        """
+        multiqc {params.inputdirRAW} --outdir {params.outdirRAW} --replace-names {input.accessionIDs} --force 2> {log}
+        multiqc {params.inputdirCLEAN} --outdir {params.outdirCLEAN} --replace-names {input.accessionIDs} --force 2>> {log}
+        multiqc {params.indirALIGNMENT} --outdir {params.outdirALIGNMENT} --replace-names {input.accessionIDs} --force 2>> {log}
+        """
+
+
+rule TRIMMOMATIC:
+    input:
+        fastqFiles = expand(join(inputPath, "RAWFASTQ", "{fastqfile}.fastq"), fastqfile = accessionList),
+        TruSeq3 = join("workflow", "TruSeq3-SE.fa")
+    output:
+        temporary(expand(join(inputPath, "CLEANFASTQ", "{fastqfile}.fastq"), fastqfile = accessionList))
+    params:
+        outdir = join(inputPath, "CLEANFASTQ"),
+        indir = join(inputPath, "RAWFASTQ"),
+        threads = config["threads"],
+        accessionList = accessionList
+    log:
+        join(logPath, "trimmomatic.log")
+    shell:
+        """
+        for accessionNumber in {params.accessionList}
+        do
+        trimmomatic SE {params.indir}/${{accessionNumber}}.fastq {params.outdir}/${{accessionNumber}}.fastq ILLUMINACLIP:workflow/TruSeq3-SE.fa:2:30:10 LEADING:3 TRAILING:3 SLIDINGWINDOW:4:15 MINLEN:36 -threads {params.threads} 2> {log}
+        done
+        """
+
+
+rule BOWTIE2_BUILD:
+    input:
+        expand(join(inputPath, "GENOME", "{genome}.fa"),  genome = genome)
+    output:
+        bt2 = temporary(expand(join(inputPath, "GENOME", "{genome}.{i}.bt2"), genome = genome, i = range(1,5))),
+        rev = temporary(expand(join(inputPath, "GENOME", "{genome}.rev.{i}.bt2"), genome = genome, i = range(1,3)))
+    params:
+        threads = config["threads"],
+        outdir = directory(expand(join(inputPath, "GENOME", "{genome}"), genome = genome))
+    log:
+        join(logPath, "index_genome.log")
+    shell:
+        """
+        bowtie2-build {input} {params.outdir} --threads {params.threads} --verbose &>> {log}
+        """
+
+rule BOWTIE2:
+    input:
+        fastqFiles = expand(join(inputPath, "CLEANFASTQ", "{fastqfile}.fastq"), fastqfile = accessionList),
+        bt2 = expand(join(inputPath, "GENOME", "{genome}.{i}.bt2"), genome = genome, i = range(1,5)),
+        rev = expand(join(inputPath, "GENOME", "{genome}.rev.{i}.bt2"), genome = genome, i = range(1,3))
+    output:
+        temporary(expand(join(tempPath, "ALIGNMENT", "{accessionNumber}.sam"), accessionNumber = accessionList))
+    log:
+        join(logPath, "alignment.log")
+    params:
+        threads = config["threads"],
+        index = expand(join(inputPath, "GENOME", "{genome}"), organism=organismName, genome=genome),
+        outdir = join(tempPath, "ALIGNMENT"),
+        indir = join(inputPath, "CLEANFASTQ"),
+        accessionList = accessionList,
+        cleanTemp = config["removeTempFiles"]
+    shell:
+        """
+        echo Starting alignment... > {log}
+        for accessionNumber in {params.accessionList}
+        do
+        echo --- >> {log}
+        echo {params.indir}/${{accessionNumber}}.fastq >> {log}
+        bowtie2 --threads {params.threads} -x {params.index} -U {params.indir}/${{accessionNumber}}.fastq -S {tempPath}/ALIGNMENT/${{accessionNumber}}.sam 2>> log
+        done
+        if [ '{params.cleanTemp}' = 'True' ]; then
+        rm {params.indir}/*.fastq; fi
+        """
+
+rule SAMTOOLS:
+    input:
+        expand(join(tempPath, "ALIGNMENT", "{accessionNumber}.sam"), accessionNumber = accessionList)
+    output:
+        expand(join(tempPath, "ALIGNMENT", "{accessionNumber}.bam"), accessionNumber = accessionList)
+    params:
+        threads = config["threads"],
+        alignDir = join(tempPath, "ALIGNMENT"),
+        accessionList = accessionList
+    shell:
+        """
+        for accessionNumber in {params.accessionList} 
+        do
+        samtools view -u {params.alignDir}/${{accessionNumber}}.sam -@ {params.threads} | samtools sort -@ {params.threads} -o {params.alignDir}/${{accessionNumber}}.bam
+        done
+        """
+
+rule GFFREAD:
+    input:
+        expand(join(inputPath, "GENOME", "{genome}.gff3"), genome = genome)
+    output:
+        temporary(expand(join(inputPath, "GENOME", "{genome}.gtf"), genome = genome))
+    shell:
+        """
+        gffread {input} -T -o {output}
+        """
+
+rule FEATURECOUNTS:
+    input:
+        gtf = expand(join(inputPath, "GENOME", "{genome}.gtf"), genome = genome),
+        bam = expand(join(tempPath, "ALIGNMENT", "{accessionNumber}.bam"), accessionNumber = accessionList)
+    output:
+        counts = expand(join(outputPath, "FEATURECOUNTS", "{genome}.counts.tsv"), genome = genome),
+        summary = expand(join(outputPath, "FEATURECOUNTS", "{genome}.counts.tsv.summary"), genome = genome)
+    params:
+        threads = config["threads"] if config["threads"] <= 64 else 64,
+        outdir = join(outputPath, "FEATURECOUNTS"),
+        indir = join(tempPath, "ALIGNMENT", "*.bam"),
+        feature = config["feature"],
+        attribute = config["attribute"],
+        cleanTemp = config["removeTempFiles"]
+    log:
+        join(logPath, "featurecounts.log")
+    shell:
+        """
+        featureCounts -t {params.feature} -g {params.attribute} -T {params.threads} -O -a {input.gtf} -o {output.counts} {params.indir} 2> {log}
+        if [ '{params.cleanTemp}' = 'True' ]; then
+        rm {params.indir}; fi
+        """

@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 temp/*
 output/*
 input/*
@@ -8,3 +9,16 @@ input/*
 *.xlxs
 *.gff3
 *.log
+=======
+*.RData
+*.log
+*.RDS
+*.Rmd
+*.Rproj
+*.DS_Store
+input/*
+others/*
+output/*
+temp/*
+.snakemake/*
+>>>>>>> cb176cd334c7090aedb8c204fcc35f15abe2212d
