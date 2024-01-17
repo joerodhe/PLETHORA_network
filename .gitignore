@@ -1,6 +1,7 @@
 temp/*
 output/*
 input/*
+._*
 *.fastq
 *.transfac
 .snakemake/*
@@ -12,3 +13,6 @@ input/*
 *.RDS
 *.Rproj
 *.DS_Store
+*.png
+*.pdf
+*.jpeg
