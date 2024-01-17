@@ -1,6 +1,6 @@
 temp/*
 output/*
-*.fa
+input/*
 *.fastq
 *.transfac
 .snakemake/*
