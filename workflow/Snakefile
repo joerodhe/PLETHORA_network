@@ -149,7 +149,10 @@ rule TRIMMOMATIC:
         expOrg(inputPaths, "CLEANFASTQ", accessionList, ".fastq")
     params:
         threads = config["threads"]
-    run:
+    shell:
+        """
+        
+        """
         for accN, accClean in zip(accOrg, accOrgClean):
             shell(
                 "echo 'trimmomatic SE {accN} {accClean} ILLUMINACLIP:workflow/TruSeq3-SE.fa:2:30:10 LEADING:3 TRAILING:3 SLIDINGWINDOW:4:15 MINLEN:36 -threads {params.threads}'"
