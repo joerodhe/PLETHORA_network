@@ -1,0 +1,10 @@
+name: snakemake
+channels:
+  - bioconda
+  - conda-forge
+dependencies:
+  - numpy=1.26
+  - pandas=2.1.2
+  - python=3.11
+  - snakemake=7.32
+  - dropbox=11.36
