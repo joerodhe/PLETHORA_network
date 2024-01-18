@@ -34,7 +34,7 @@ rap_msu = pd.read_csv(args.rapmsu, sep='\t', header=None, names=['orig', 'mapped
 print(rap_msu)
 mapped = []
 for mapped_id in rap_msu.mapped:
-    print(mapped_id)
+    #print(mapped_id)
     mapped_id = mapped_id.split('.', maxsplit=1)[0]
     mapped.append(mapped_id)
 rap_msu.mapped = mapped
