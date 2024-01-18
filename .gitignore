@@ -1,6 +1,8 @@
 temp/*
 output/*
 input/*
+!input/Oryza_sativa_Japonica_Group/GENOME/RAP-MSU.txt
+!input/Zea_mays/GENOME/genes_to_alias_ids.tsv
 .snakemake/*
 .vscode/*
 fasterq.tmp.*/*
