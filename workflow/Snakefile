@@ -98,29 +98,25 @@ rule FASTERQ_DUMP:
         fastq = expOrg(inputPaths, "RAWFASTQ", accessionList, ".fastq")
     params:
         threads = config["threads"],
-        nOrg = len(config["organisms"])
-    #conda:
-    #    "sratools"
+        nOrg = len(config["organisms"]),
+        nSample = len(accessionList[0])
+    conda:
+        "sratools"
     shell:
         """
         inputPaths=({inputPaths})
-        echo {accessionList}
-        echo "${{accessionList[@]}}"
-        acl=($(echo {accessionList} | tr '[]' '"' | tr -d ','))
-        echo "${{acl[@]}}"
-        echo "${{#acl[@]}}"
-        #logPaths=({logPaths})
-        #for ((i=0; i<{params.nOrg}; i++))
-        #do
-        #outputPath=${{inputPaths[$i]}}/RAWFASTQ
-        #logFile=${{logPaths[$i]}}/fasterqdump.log
-        #accList=("${{acl[$i]}}")
-        #echo $i
-        #echo $outputPath
-        #echo $accList
-        #echo $logFile
-        ##fasterq-dump --outdir $outputPath --threads {params.threads} --verbose --split-files $accList &> $logFile
-        #done
+        acl=($(echo {accessionList} | tr -d '[],'))
+        nSample=({params.nSample})
+        logPaths=({logPaths})
+        z=0
+        for ((i=0; i<{params.nOrg}; i++))
+        do
+        outputPath=${{inputPaths[$i]}}/RAWFASTQ
+        logFile=${{logPaths[$i]}}/fasterqdump.log
+        accList=(${{acl[@]:$z:$nSample}})
+        fasterq-dump --outdir $outputPath --threads {params.threads} --verbose --split-files ${{accList[@]}} &> $logFile
+        z=$(($z+$nSample))
+        done
         """
 
 rule CISBP:
