@@ -13,7 +13,9 @@ def expOrg(pathlist,inter,acclist,format):
     res = [j for i in res for j in i]
     return res
 
-SraRunTable = pd.read_csv("workflow/SraRunTable.csv")
+workflowPath = "workflow/input"
+
+SraRunTable = pd.read_csv(join(workflowPath, "SraRunTable.csv"))
 SraRunTable = SraRunTable.iloc[[org in config["organisms"] for org in SraRunTable.Organism]]
 accessionList = [SraRunTable.Run.loc[SraRunTable.Organism == org].to_list() for org in config["organisms"]]
 organismNames = [org.replace(" ", "_") for org in config["organisms"]]
@@ -26,10 +28,12 @@ refOrganismName = config["refOrganism"].replace(" ", "_")
 inputPaths = expand(join("input", "{organismName}"), organismName = organismNames)
 logPaths = expand(join("workflow", "logs", "{organismName}"), organismName = organismNames)
 outputPaths = expand(join("output", "{organismName}"), organismName = organismNames)
+outputInterspecie = join("output", "interspecie")
 tempPaths = expand(join("temp", "{organismName}"), organismName = organismNames)
-workflowPath = "workflow/input"
+tempInterspecie = join("temp", "interpecie")
 
-Path(join("output", "interspecie")).mkdir(parents = True, exist_ok = True)
+Path(outputInterspecie).mkdir(parents = True, exist_ok = True)
+Path(tempInterspecie).mkdir(parents = True, exist_ok = True)
 
 for logPath in logPaths:
     Path(logPath).mkdir(parents = True, exist_ok = True)
@@ -125,7 +129,9 @@ rule CISBP:
         rapMSU = join("input", "Oryza_sativa_Japonica_Group", "GENOME", "RAP-MSU.txt"),
         zeaIDs = join("input", "Zea_mays", "GENOME", "genes_to_alias_ids.tsv")
     output:
-        join(workflowPath, "PLT-TFs_related.tsv")
+        join(tempInterspecie, "PLT-TFs_related.tsv")
+    conda:
+        "base"
     shell:
         """
         python bin/cisbp.py\
