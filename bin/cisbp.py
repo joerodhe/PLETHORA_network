@@ -30,11 +30,17 @@ for plt, plt_url in plt_urls.items():
     plt_table = parse_table(url=plt_url, genid=plt, org_list=org_list)
     tfs_plt_related = pd.concat([tfs_plt_related, plt_table], axis=0)
 
-rap_msu = pd.read_csv(args.rapmsu, sep='\t', header=None, names=['orig', 'mapped'], comment='#')
-print(rap_msu)
+rap_msu = pd.read_csv(
+    args.rapmsu, 
+    sep='\t', 
+    header=None, 
+    names=['orig', 'mapped'], 
+    comment='#', 
+    keep_default_na=False,
+    na_values=['NaN'])
+
 mapped = []
 for mapped_id in rap_msu.mapped:
-    #print(mapped_id)
     mapped_id = mapped_id.split('.', maxsplit=1)[0]
     mapped.append(mapped_id)
 rap_msu.mapped = mapped
