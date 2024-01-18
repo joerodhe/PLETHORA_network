@@ -1,0 +1,32 @@
+name: sratools
+channels:
+  - bioconda
+dependencies:
+  - icu=58.2=h0a44026_3
+  - libcxx=14.0.6=h9765a3e_0
+  - libiconv=1.16=hca72f7f_2
+  - libxml2=2.9.14=hbf8cd5e_0
+  - ncbi-ngs-sdk=2.11.2=h247ad82_0
+  - perl=5.26.2=h4e221da_0
+  - perl-app-cpanminus=1.7044=pl526_1
+  - perl-business-isbn=3.004=pl526_0
+  - perl-business-isbn-data=20140910.003=pl526_0
+  - perl-carp=1.38=pl526_3
+  - perl-constant=1.33=pl526_1
+  - perl-data-dumper=2.173=pl526_0
+  - perl-encode=2.88=pl526_1
+  - perl-exporter=5.72=pl526_1
+  - perl-extutils-makemaker=7.36=pl526_1
+  - perl-file-path=2.16=pl526_0
+  - perl-file-temp=0.2304=pl526_2
+  - perl-mime-base64=3.15=pl526_1
+  - perl-parent=0.236=pl526_1
+  - perl-uri=1.76=pl526_0
+  - perl-xml-libxml=2.0132=pl526h08abf6f_1
+  - perl-xml-namespacesupport=1.12=pl526_0
+  - perl-xml-sax=1.02=pl526_0
+  - perl-xml-sax-base=1.09=pl526_0
+  - perl-xsloader=0.24=pl526_0
+  - sra-tools=2.10.0=pl526h6de7cb9_0
+  - xz=5.4.2=h6c40b1e_0
+  - zlib=1.2.13=h4dc903c_0
