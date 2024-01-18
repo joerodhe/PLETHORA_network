@@ -70,25 +70,25 @@ for idsFile, organismName in zip(idsFiles, config["organisms"]):
         SraRunTable.loc[SraRunTable.Organism == organismName,["Run", "SampleID"]].to_csv(idsFile, 
             sep = "\t", header=False, index=False)
 
-rule ALL:
-    input:
-        reportALIGNMENT = report(
-            expand(join("{outputPaths}", "MULTIQC", "FEATURECOUNTS", "multiqc_report.html"), outputPaths = outputPaths),
-            category="Gene quantification",
-            caption="report/multiqc_featurecounts.rst"),
-        reportCLEAN = report(
-            expand(join("{outputPaths}", "MULTIQC", "CLEAN", "multiqc_report.html"), outputPaths = outputPaths),
-            category="Clean reads quality report",
-            caption="report/multiqc_fastqc.rst"),
-        reportRAW = report(
-            expand(join("{outputPaths}", "MULTIQC", "RAW", "multiqc_report.html"), outputPaths = outputPaths),
-            category="Raw reads quality report",
-            caption="report/multiqc_fastqc.rst"),
-        reportNET = report(
-            directory(expand(join("output", "{ref}", "NETWORK"), ref=refOrganismName)),
-            patterns = ["{name}.svg"],
-            category = "Curated Arabidopsis PLT-driven GRN"
-        )
+#rule ALL:
+#    input:
+#        reportALIGNMENT = report(
+#            expand(join("{outputPaths}", "MULTIQC", "FEATURECOUNTS", "multiqc_report.html"), outputPaths = outputPaths),
+#            category="Gene quantification",
+#            caption="report/multiqc_featurecounts.rst"),
+#        reportFastqCLEAN = report(
+#            expand(join("{outputPaths}", "MULTIQC", "CLEAN", "multiqc_report.html"), outputPaths = outputPaths),
+#            category="Clean reads quality report",
+#            caption="report/multiqc_fastqc.rst"),
+#        reportFastqRAW = report(
+#            expand(join("{outputPaths}", "MULTIQC", "RAW", "multiqc_report.html"), outputPaths = outputPaths),
+#            category="Raw reads quality report",
+#            caption="report/multiqc_fastqc.rst"),
+#        reportNET = report(
+#            directory(expand(join("output", "{ref}", "NETWORK"), ref=refOrganismName)),
+#            patterns = ["{name}.svg"],
+#            category = "Curated Arabidopsis PLT-driven GRN"
+#        )
         
 
 rule FASTERQ_DUMP:
