@@ -3,6 +3,7 @@ output/*
 input/*
 .snakemake/*
 .vscode/*
+fasterq.tmp.*/*
 ._*
 *.fastq
 *.transfac
