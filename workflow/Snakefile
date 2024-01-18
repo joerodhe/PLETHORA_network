@@ -57,10 +57,6 @@ for dirOrg in dirs:
         Path(dir).mkdir(parents = True, exist_ok = True)
 
 idsFiles = expand(join("{tempPaths}", "sampleIDs.tsv"), tempPaths = tempPaths)
-
-print(idsFiles)
-print(config["organisms"])
-
 for idsFile, organismName in zip(idsFiles, config["organisms"]):
     if not exists(idsFile): 
         SampleID = []
@@ -70,8 +66,7 @@ for idsFile, organismName in zip(idsFiles, config["organisms"]):
             elif row["root_zone"] == "Root elongation zone": zone = "EZ"
             else: zone = "MIXED"
             SampleID.append("-".join([zone, row["Run"]]))
-        SraRunTable.SampleID = SampleID
-        print(SraRunTable)
+        SraRunTable["SampleID"] = SampleID
         SraRunTable.loc[SraRunTable.Organism == organismName,["Run", "SampleID"]].to_csv(idsFile, 
             sep = "\t", header=False, index=False)
 
