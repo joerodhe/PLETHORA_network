@@ -150,18 +150,30 @@ rule TRIMMOMATIC:
         threads = config["threads"],
         nOrg = len(config["organisms"]),
         nSample = len(accessionList[0])
+    conda:
+        "trimmomatic"
     shell:
         """
         organisms=({organismNames})
         acl=($(echo {accessionList} | tr -d '[],'))
+        z=0
+        logPaths=({logPaths})
+        threads={params.threads}
+        if [ $threads -gt 1 ]; then
+            parallel=true
+        else
+            parallel=false
+        fi
         for ((i=0; i<{params.nOrg}; i++)); do
-            inputpath=input/${{organisms[$i]}}/RAWFASTQ/
-            outputpath=output/${{organisms[$i]}}/FASTQ/CLEAN
-            z=0
+            inputpath=input/${{organisms[$i]}}/RAWFASTQ
+            outputpath=output/${{organisms[$i]}}/FASTQ/CLEAN  
+            mkdir -p $outputpath
             for ((x=0; x<{params.nSample}; x++)); do
-            inputfastq=$inputpath/${{acl[@]:$z:1}}
-            outputfastq=$outputfastq/${{acl[@]:$z:1}}
-            echo \"trimmomatic SE $inputfastq $outputfastq ILLUMINACLIP:workflow/TruSeq3-SE.fa:2:30:10 LEADING:3 TRAILING:3 SLIDINGWINDOW:4:15 MINLEN:36 -threads {params.threads}\"
+            inputfastq=$inputpath/${{acl[@]:$z:1}}.fastq
+            outputfastq=$outputpath/${{acl[@]:$z:1}}.fastq
+            log=${{logPaths[$i]}}/${{acl[@]:$z:1}}_trimmomatic.log
+            if [ $parallel ]
+            trimmomatic SE $inputfastq $outputfastq ILLUMINACLIP:workflow/TruSeq3-SE.fa:2:30:10 LEADING:3 TRAILING:3 SLIDINGWINDOW:4:15 MINLEN:36 -threads {params.threads} &> $log
             z=$(($z+1))
             done
         done
