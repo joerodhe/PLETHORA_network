@@ -97,7 +97,7 @@ for idsFile, organismName in zip(idsFiles, config["organisms"]):
 
 rule FASTERQ_DUMP:
     input:
-        "workflow/SraRunTable.csv"
+        "workflow/input/SraRunTable.csv"
     output:
         fastq = expOrg(inputPaths, "RAWFASTQ", accessionList, ".fastq")
     params:
@@ -113,13 +113,12 @@ rule FASTERQ_DUMP:
         nSample=({params.nSample})
         logPaths=({logPaths})
         z=0
-        for ((i=0; i<{params.nOrg}; i++))
-        do
-        outputPath=${{inputPaths[$i]}}/RAWFASTQ
-        logFile=${{logPaths[$i]}}/fasterqdump.log
-        accList=(${{acl[@]:$z:$nSample}})
-        fasterq-dump --outdir $outputPath --threads {params.threads} --verbose --split-files ${{accList[@]}} &> $logFile
-        z=$(($z+$nSample))
+        for ((i=0; i<{params.nOrg}; i++)); do
+            outputPath=${{inputPaths[$i]}}/RAWFASTQ
+            logFile=${{logPaths[$i]}}/fasterqdump.log
+            accList=(${{acl[@]:$z:$nSample}})
+            fasterq-dump --outdir $outputPath --threads {params.threads} --verbose --split-files ${{accList[@]}} &> $logFile
+            z=$(($z+$nSample))
         done
         """
 
@@ -146,17 +145,27 @@ rule TRIMMOMATIC:
         fastqFiles = expOrg(inputPaths, "RAWFASTQ", accessionList, ".fastq"),
         TruSeq3 = join("workflow", "TruSeq3-SE.fa")
     output:
-        expOrg(inputPaths, "CLEANFASTQ", accessionList, ".fastq")
+        #expOrg(inputPaths, "CLEANFASTQ", accessionList, ".fastq")
     params:
-        threads = config["threads"]
+        threads = config["threads"],
+        nOrg = len(config["organisms"]),
+        nSample = len(accessionList[0])
     shell:
         """
-        
+        organisms=({organismNames})
+        acl=($(echo {accessionList} | tr -d '[],'))
+        for ((i=0; i<{params.nOrg}; i++)); do
+            inputpath=input/${{organisms[$i]}}/RAWFASTQ/
+            outputpath=output/${{organisms[$i]}}/FASTQ/CLEAN
+            z=0
+            for ((x=0; x<{params.nSample}; x++)); do
+            inputfastq=$inputpath/${{acl[@]:$z:1}}
+            outputfastq=$outputfastq/${{acl[@]:$z:1}}
+            echo \"trimmomatic SE $inputfastq $outputfastq ILLUMINACLIP:workflow/TruSeq3-SE.fa:2:30:10 LEADING:3 TRAILING:3 SLIDINGWINDOW:4:15 MINLEN:36 -threads {params.threads}\"
+            z=$(($z+1))
+            done
+        done
         """
-        for accN, accClean in zip(accOrg, accOrgClean):
-            shell(
-                "echo 'trimmomatic SE {accN} {accClean} ILLUMINACLIP:workflow/TruSeq3-SE.fa:2:30:10 LEADING:3 TRAILING:3 SLIDINGWINDOW:4:15 MINLEN:36 -threads {params.threads}'"
-            )
 
 
 rule FASTQC:
