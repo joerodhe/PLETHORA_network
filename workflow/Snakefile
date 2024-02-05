@@ -142,7 +142,7 @@ rule CISBP:
 
 rule TRIMMOMATIC:
     input:
-        fastqFiles = expOrg(inputPaths, "RAWFASTQ", accessionList, ".fastq"),
+        #fastqFiles = expOrg(inputPaths, "RAWFASTQ", accessionList, ".fastq"),
         TruSeq3 = join("workflow", "TruSeq3-SE.fa")
     output:
         #expOrg(inputPaths, "CLEANFASTQ", accessionList, ".fastq")
@@ -159,39 +159,41 @@ rule TRIMMOMATIC:
         z=0
         logPaths=({logPaths})
         threads={params.threads}
-        for ((i=0; i<{params.nOrg}; i++)); do
+        nSample={params.nSample}
+        nOrg={params.nOrg}
+        for ((i=0; i<${{nOrg}}; i++)); do
             inputpath=input/${{organisms[$i]}}/RAWFASTQ
             outputpath=output/${{organisms[$i]}}/FASTQ/CLEAN  
             mkdir -p $outputpath
-            for ((x=0; x<{params.nSample}; x++)); do
+            for ((x=0; x<${{nSample}}; x++)); do
                 inputfastq=$inputpath/${{acl[@]:$z:1}}.fastq
                 outputfastq=$outputpath/${{acl[@]:$z:1}}.fastq
                 log=${{logPaths[$i]}}/${{acl[@]:$z:1}}_trimmomatic.log
-                if [ $threads -gt 1 ]; then
+                if [ $threads -gt 1 ] && [ $(( $(($x+1)) * $(($i+1))  )) -ne  $(( $nSample * $nOrg )) ]; then
                     parallel=true
                 else
                     parallel=false
                 fi
                 if $parallel
                     then
-                    trimmomatic SE\
+                    echo \"trimmomatic SE\
                     $inputfastq\
                     $outputfastq\
                     ILLUMINACLIP:workflow/TruSeq3-SE.fa:2:30:10\
                     LEADING:3\
                     TRAILING:3\
                     SLIDINGWINDOW:4:15\
-                    MINLEN:36 &> $log &
+                    MINLEN:36 &> $log &\"
                     threads=$(($threads-1))
                     else
-                    trimmomatic SE\
+                    echo \"trimmomatic SE\
                     $inputfastq\
                     $outputfastq\
                     ILLUMINACLIP:workflow/TruSeq3-SE.fa:2:30:10\
                     LEADING:3\
                     TRAILING:3\
                     SLIDINGWINDOW:4:15\
-                    MINLEN:36 &> $log
+                    MINLEN:36 &> $log\"
                     fi
                 z=$(($z+1))
             done
