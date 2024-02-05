@@ -182,6 +182,7 @@ rule TRIMMOMATIC:
                     TRAILING:3\
                     SLIDINGWINDOW:4:15\
                     MINLEN:36 &> $log &
+                    echo $!
                     threads=$(($threads-1))
                     else
                     trimmomatic SE\
@@ -191,11 +192,12 @@ rule TRIMMOMATIC:
                     LEADING:3\
                     TRAILING:3\
                     SLIDINGWINDOW:4:15\
-                    MINLEN:36 &> $log
+                    MINLEN:36 -threads {params.threads} &> $log
                     fi
                 z=$(($z+1))
             done
         done
+        wait
         """
 
 
