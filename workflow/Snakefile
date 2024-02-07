@@ -2,11 +2,14 @@
 
 configfile: "workflow/config.yaml"
 
+
 import pandas as pd
 from os.path import join
 from pathlib import Path
 from os.path import exists
 from os import listdir
+
+from snakemake.io import expand
 
 def expOrg(pathlist,inter,acclist,format):
     res = [expand(join("{path}", "{inter}", "{acc}{format}"), path=path,inter=inter,acc=acc,format=format) for path,acc in zip(pathlist,acclist)]
@@ -73,6 +76,13 @@ for idsFile, organismName in zip(idsFiles, config["organisms"]):
         SraRunTable["SampleID"] = SampleID
         SraRunTable.loc[SraRunTable.Organism == organismName,["Run", "SampleID"]].to_csv(idsFile, 
             sep = "\t", header=False, index=False)
+
+
+
+#  inputdirRAW = join(inputPath, "RAWFASTQ", "*")
+#fastqs_raw = 
+#fastq_dirs = 
+
 
 #rule ALL:
 #    input:
@@ -205,28 +215,54 @@ rule TRIMMOMATIC:
 
 rule FASTQC:
     input:
-        fastqRAW = expOrg(inputPaths, "RAWFASTQ", accessionList, ".fastq"),
-        fastqCLEAN = expOrg(inputPaths, "CLEANFASTQ", accessionList, ".fastq")
+        #fastqRAW = expOrg(inputPaths, "RAWFASTQ", accessionList, ".fastq"),
+        #fastqCLEAN = expOrg(inputPaths, "CLEANFASTQ", accessionList, ".fastq")
     output:
-        reportRAW = expOrg(outputPaths, "FASTQC/RAW", accessionList, "_fastqc.html"),
-        reportCLEAN = expOrg(outputPaths, "FASTQC/CLEAN", accessionList, "_fastqc.html"),
-        zipReportRAW = expOrg(outputPaths, "FASTQC/RAW", accessionList, "_fastqc.zip"),
-        zipReportCLEAN = expOrg(outputPaths, "FASTQC/CLEAN", accessionList, "_fastqc.zip")
+        #reportRAW = expOrg(outputPaths, "FASTQC/RAW", accessionList, "_fastqc.html"),
+        #reportCLEAN = expOrg(outputPaths, "FASTQC/CLEAN", accessionList, "_fastqc.html"),
+        #zipReportRAW = expOrg(outputPaths, "FASTQC/RAW", accessionList, "_fastqc.zip"),
+        #zipReportCLEAN = expOrg(outputPaths, "FASTQC/CLEAN", accessionList, "_fastqc.zip")
     params:
+        fastq_dirs = expand(join("{inputPaths}", "{FASTQDIR}"), inputPaths = inputPaths, FASTQDIR = ["RAWFASTQ", "CLEANFASTQ"]),
         threads = config["threads"]
-    run:
-        for inputPath,outputPath,logPaths in zip(inputPaths,outputPaths,logPaths):
-            inputdirRAW = join(inputPath, "RAWFASTQ", "*")
-            outdirRAW = join(join(outputPath, "FASTQC", "RAW"))
-            inputdirCLEAN = join(inputPath, "CLEANFASTQ", "*")
-            outdirCLEAN = join(join(outputPath, "FASTQC", "CLEAN"))
-            logFile = join(logPaths, "fastqc.log")
-            shell(
-                "fastqc {inputdirRAW} --threads {params.threads} --outdir {outdirRAW} 2> {logFile}"
-            )
-            shell(
-                "fastqc {inputdirCLEAN} --threads {params.threads} --outdir {outdirCLEAN} 2>> {logFile}"
-            )
+    log:
+
+    conda:
+        config["envs"]["fastqc"]
+    shell:
+        """
+        start=`date +%s`
+        source bin/parallel.sh
+        declare -a args
+        i=0
+        for fastq_dir in {params.fastq_dirs}; do
+            echo $fastq_dir
+            outdir=$(echo $fastq_dir | sed 's/input/output/' | sed 's/FASTQ/FASTQC/')
+            echo $outdir
+            fastqs=$(find $fastq_dir -maxdepth 1 -type f -not -path '*/\.*' -regex '.*\\.fastq')
+            for fastq in ${{fastqs[@]}};do
+                arg=\"--threads 1 --quiet --outdir ${{outdir}} ${{fastq}}\"
+                args[$i]=$arg
+                let i+=1
+            done
+        done
+        parallel --func echo --threads {params.threads} --args \"${{args[@]}}\" >> {log}
+        end=`date +%s`
+        echo Execution time was `expr $end - $start` seconds. >> {log}
+        """
+    #run:
+    #    for inputPath,outputPath,logPaths in zip(inputPaths,outputPaths,logPaths):
+    #        inputdirRAW = join(inputPath, "RAWFASTQ", "*")
+    #        outdirRAW = join(join(outputPath, "FASTQC", "RAW"))
+    #        inputdirCLEAN = join(inputPath, "CLEANFASTQ", "*")
+    #        outdirCLEAN = join(join(outputPath, "FASTQC", "CLEAN"))
+    #        logFile = join(logPaths, "fastqc.log")
+    #        shell(
+    #            "fastqc {inputdirRAW} --threads {params.threads} --outdir {outdirRAW} 2> {logFile}"
+    #        )
+    #        shell(
+    #            "fastqc {inputdirCLEAN} --threads {params.threads} --outdir {outdirCLEAN} 2>> {logFile}"
+    #        )
 
 
 #rule MULTIQC:
