@@ -1,9 +1,9 @@
 #!/bin/bash
 
+set -eu
+
 # Define the parse_arguments function
 parallel() {
-
-    set -eu
 
     local func
     local -a args
