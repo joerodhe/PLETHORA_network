@@ -8,8 +8,16 @@ from os.path import join
 from pathlib import Path
 from os.path import exists
 from os import listdir
+from datetime import datetime
 
-from snakemake.io import expand
+#from snakemake.io import expand
+
+now = datetime.now()
+now = now.strftime("%d_%m_%Y_%H_%M_%S")
+
+logs_dir = os.path.join("LOGS", now)
+Path(logs_dir).mkdir(parents = True, exist_ok = True)
+print("Saving logs in " + logs_dir)
 
 def expOrg(pathlist,inter,acclist,format):
     res = [expand(join("{path}", "{inter}", "{acc}{format}"), path=path,inter=inter,acc=acc,format=format) for path,acc in zip(pathlist,acclist)]
@@ -226,7 +234,7 @@ rule FASTQC:
         fastq_dirs = expand(join("{inputPaths}", "{FASTQDIR}"), inputPaths = inputPaths, FASTQDIR = ["RAWFASTQ", "CLEANFASTQ"]),
         threads = config["threads"]
     log:
-
+        join(logs_dir, "fastqc.log")
     conda:
         config["envs"]["fastqc"]
     shell:
@@ -236,9 +244,7 @@ rule FASTQC:
         declare -a args
         i=0
         for fastq_dir in {params.fastq_dirs}; do
-            echo $fastq_dir
-            outdir=$(echo $fastq_dir | sed 's/input/output/' | sed 's/FASTQ/FASTQC/')
-            echo $outdir
+            outdir=$(echo $fastq_dir | sed 's/input/output/' | sed 's/RAWFASTQ/FASTQC\/RAW/' | sed 's/CLEANFASTQ/FASTQC\/CLEAN/')
             fastqs=$(find $fastq_dir -maxdepth 1 -type f -not -path '*/\.*' -regex '.*\\.fastq')
             for fastq in ${{fastqs[@]}};do
                 arg=\"--threads 1 --quiet --outdir ${{outdir}} ${{fastq}}\"
@@ -246,23 +252,10 @@ rule FASTQC:
                 let i+=1
             done
         done
-        parallel --func echo --threads {params.threads} --args \"${{args[@]}}\" >> {log}
+        parallel --func fastqc --threads {params.threads} --args \"${{args[@]}}\" >> {log}
         end=`date +%s`
         echo Execution time was `expr $end - $start` seconds. >> {log}
         """
-    #run:
-    #    for inputPath,outputPath,logPaths in zip(inputPaths,outputPaths,logPaths):
-    #        inputdirRAW = join(inputPath, "RAWFASTQ", "*")
-    #        outdirRAW = join(join(outputPath, "FASTQC", "RAW"))
-    #        inputdirCLEAN = join(inputPath, "CLEANFASTQ", "*")
-    #        outdirCLEAN = join(join(outputPath, "FASTQC", "CLEAN"))
-    #        logFile = join(logPaths, "fastqc.log")
-    #        shell(
-    #            "fastqc {inputdirRAW} --threads {params.threads} --outdir {outdirRAW} 2> {logFile}"
-    #        )
-    #        shell(
-    #            "fastqc {inputdirCLEAN} --threads {params.threads} --outdir {outdirCLEAN} 2>> {logFile}"
-    #        )
 
 
 #rule MULTIQC:
