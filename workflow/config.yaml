@@ -18,7 +18,7 @@ forceTOMCalc: False #Force re-run TOM calculation
 forceBLAST: True #Force re-run BLAST
 gmmThreshold: 0.5
 blast: bbh #best or bbh
-threads: 4
+threads: 3
 removeTempFiles: False #Clean fastq files, bam files and WGCNA data
 envs: {
   "fastqc": "fastqc"

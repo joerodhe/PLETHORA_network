@@ -188,7 +188,7 @@ rule TRIMMOMATIC:
                 let i+=1
             done
         done
-        parallel --func trimmomatic --threads 1 --args \"${{args[@]}}\" >> {log}
+        parallel --func echo --threads {params.threads} --args \"${{args[@]}}\" >> {log}
         end=`date +%s`
         echo Execution time was `expr $end - $start` seconds. >> {log}
         """
