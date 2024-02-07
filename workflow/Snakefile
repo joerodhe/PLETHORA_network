@@ -167,57 +167,30 @@ rule TRIMMOMATIC:
     params:
         threads = config["threads"],
         nOrg = len(config["organisms"]),
-        nSample = len(accessionList[0])
+        nSample = len(accessionList[0]),
+        fastq_dirs = expand(join("{inputPaths}", "RAWFASTQ"), inputPaths = inputPaths)
     conda:
         "trimmomatic"
+    log:
+        join(logs_dir, "trimmomatic.log")
     shell:
         """
-        organisms=({organismNames})
-        acl=($(echo {accessionList} | tr -d '[],'))
-        z=0
-        logPaths=({logPaths})
-        threads={params.threads}
-        nSample={params.nSample}
-        nOrg={params.nOrg}
-        for ((i=0; i<${{nOrg}}; i++)); do
-            inputpath=input/${{organisms[$i]}}/RAWFASTQ
-            outputpath=output/${{organisms[$i]}}/FASTQ/CLEAN  
-            mkdir -p $outputpath
-            for ((x=0; x<${{nSample}}; x++)); do
-                inputfastq=$inputpath/${{acl[@]:$z:1}}.fastq
-                outputfastq=$outputpath/${{acl[@]:$z:1}}.fastq
-                log=${{logPaths[$i]}}/${{acl[@]:$z:1}}_trimmomatic.log
-                if [ $threads -gt 1 ] && [ $(( $(($x+1)) * $(($i+1))  )) -ne  $(( $nSample * $nOrg )) ]; then
-                    parallel=true
-                else
-                    parallel=false
-                fi
-                if $parallel
-                    then
-                    echo \"trimmomatic SE\
-                    $inputfastq\
-                    $outputfastq\
-                    ILLUMINACLIP:workflow/TruSeq3-SE.fa:2:30:10\
-                    LEADING:3\
-                    TRAILING:3\
-                    SLIDINGWINDOW:4:15\
-                    MINLEN:36 &> $log &
-                    echo $!
-                    threads=$(($threads-1))
-                    else
-                    echo \"trimmomatic SE\
-                    $inputfastq\
-                    $outputfastq\
-                    ILLUMINACLIP:workflow/TruSeq3-SE.fa:2:30:10\
-                    LEADING:3\
-                    TRAILING:3\
-                    SLIDINGWINDOW:4:15\
-                    MINLEN:36 -threads {params.threads} &> $log
-                    fi
-                z=$(($z+1))
+        start=`date +%s`
+        source bin/parallel.sh
+        declare -a args
+        i=0
+        for fastq_dir in {params.fastq_dirs}; do
+            fastqs=$(find $fastq_dir -maxdepth 1 -type f -not -path '*/\.*' -regex '.*\\.fastq')
+            for fastq in ${{fastqs[@]}}; do
+                fastq_out=$(echo $fastq | sed 's/RAWFASTQ/CLEANFASTQ/')
+                arg=\"SE $fastq $fastq_out ILLUMINACLIP:workflow/TruSeq3-SE.fa:2:30:10 LEADING:3 TRAILING:3 SLIDINGWINDOW:4:15 MINLEN:36\"
+                args[$i]=$arg
+                let i+=1
             done
         done
-        wait
+        parallel --func trimmomatic --threads 1 --args \"${{args[@]}}\" >> {log}
+        end=`date +%s`
+        echo Execution time was `expr $end - $start` seconds. >> {log}
         """
 
 
@@ -252,7 +225,7 @@ rule FASTQC:
                 let i+=1
             done
         done
-        parallel --func fastqc --threads {params.threads} --args \"${{args[@]}}\" >> {log}
+        parallel --func fastqc --threads 1 --args \"${{args[@]}}\" >> {log}
         end=`date +%s`
         echo Execution time was `expr $end - $start` seconds. >> {log}
         """
