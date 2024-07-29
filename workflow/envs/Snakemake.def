@@ -1,0 +1,24 @@
+BootStrap: docker
+From: continuumio/miniconda3
+
+%labels
+    Author YourName
+
+%post
+    # Actualizar conda
+    conda update -n base -c defaults conda -y
+
+    # Crear un entorno con Snakemake
+    conda create -n snakemake -c bioconda -c conda-forge snakemake -y
+
+    # Activar el entorno
+    echo "source activate snakemake" >> ~/.bashrc
+
+%environment
+    # Configurar el entorno para utilizar Snakemake
+    source activate snakemake
+    export PATH=/opt/conda/envs/snakemake/bin:$PATH
+
+%runscript
+    # Este es el comando que se ejecutará cuando se ejecute el contenedor
+    snakemake --help
