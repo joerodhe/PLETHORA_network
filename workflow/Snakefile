@@ -17,7 +17,6 @@ now = now.strftime("%d_%m_%Y_%H_%M_%S")
 
 logs_dir = os.path.join("LOGS", now)
 Path(logs_dir).mkdir(parents = True, exist_ok = True)
-print("Saving logs in " + logs_dir)
 
 def expOrg(pathlist,inter,acclist,format):
     res = [expand(join("{path}", "{inter}", "{acc}{format}"), path=path,inter=inter,acc=acc,format=format) for path,acc in zip(pathlist,acclist)]
