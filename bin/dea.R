@@ -77,7 +77,7 @@ dea <- function(dds, name, contrast, foldChange, output.path, organism, plts){
     name = name, 
     contrast = contrast,
     alpha=0.05, 
-    lfcThreshold = log2(as.numeric(foldChange))
+    lfcThreshold = foldChange)
     )
   summary(res)
   write.table(
