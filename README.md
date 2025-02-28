@@ -249,7 +249,7 @@ Below is a high-level summary of the pipeline (the exact steps may vary dependin
 
 ## 9. Citation & Credits
 
-This workflow references methods and software outlined in the paper describing the *Arabidopsis* PLT gene regulatory network. For each tool used (Bowtie2, DESeq2, WGCNA, clusterProfiler, RSAT, SCINET, etc.), please cite the corresponding publications.  
+This workflow references methods and software outlined in the paper describing the *Arabidopsis* PLT gene regulatory network.  
 
 - **RNA-seq workflow**:
   Love MI, Huber W, Anders S. Moderated estimation of fold change and dispersion for RNA-seq data with DESeq2. Genome Biology. 2014 Dec 5;15(12):550
