@@ -1,17 +1,37 @@
-suppressPackageStartupMessages(library(orthologr))  # For performing BLAST and ortholog prediction.
-suppressPackageStartupMessages(library(seqinr))     # For reading and processing FASTA files.
-suppressPackageStartupMessages(library(optparse))   # For command-line option parsing.
+###############################################################################
+# Description:
+#   This script performs a BLASTp search between a query and a subject protein 
+#   FASTA file, detects either unidirectional best hits or reciprocal best hits, 
+#   then converts numeric IDs in the BLAST results to locus names. The final 
+#   orthologs are saved to TSV files for downstream usage.
+###############################################################################
 
-# protein_to_locus:
-# This function reads a protein FASTA file and extracts the locus information
-# from the annotation line of each sequence.
-# Input: fasta_file - path to a protein FASTA file.
-# Output: A vector of locus identifiers.
+###############################################################################
+# Load required libraries, suppressing startup messages
+###############################################################################
+suppressPackageStartupMessages(library(orthologr))  # For BLAST and ortholog predictions
+suppressPackageStartupMessages(library(seqinr))     # For reading and processing FASTA files
+suppressPackageStartupMessages(library(optparse))   # For command-line option parsing
+
+###############################################################################
+# Function: protein_to_locus
+# --------------------------
+# Description:
+#   Reads a protein FASTA file and extracts the locus information from each
+#   sequence's annotation line (the 'Annot' attribute). For each sequence,
+#   it assumes the 4th space-delimited field after ">" is "locus=XXXXX".
+#
+# Params:
+#   fasta_file: A file path to a protein FASTA.
+#
+# Returns:
+#   A character vector of locus identifiers, in the same order as the sequences.
+###############################################################################
 protein_to_locus <- function(fasta_file){
-    # Read the FASTA file with amino acid sequences.
+    # Read the FASTA with amino acid sequences
     ref.aa <- read.fasta(fasta_file, seqtype = 'AA')
-    # For each sequence, extract the 4th element from the annotation (after splitting by space)
-    # and remove the "locus=" prefix.
+    
+    # Extract the 4th field from each annotation string, stripping out 'locus='
     x <- sapply(ref.aa, function(id_line){
         attrs <- attr(id_line, 'Annot')
         locus <- strsplit(attrs, ' ')[[1]][4]
@@ -21,112 +41,138 @@ protein_to_locus <- function(fasta_file){
     return(x)
 }
 
-# parse_orthologs:
-# This function replaces the numeric identifiers in the BLAST output (orthologs)
-# with the corresponding locus identifiers from the query and subject FASTA files.
-# It also removes duplicated entries.
-# Inputs:
-#   query   - path to the query protein FASTA file.
-#   subject - path to the subject protein FASTA file.
-#   orthologs - data frame containing BLAST results with numeric query and subject IDs.
-# Output: A filtered data frame with locus names as identifiers.
+###############################################################################
+# Function: parse_orthologs
+# -------------------------
+# Description:
+#   Takes a BLAST/ortholog output data frame and replaces numeric IDs with 
+#   the corresponding locus names from the query and subject FASTA files. 
+#   Removes any duplicated rows by query or subject locus ID. 
+#
+# Params:
+#   query    : Query protein FASTA path.
+#   subject  : Subject protein FASTA path.
+#   orthologs: Data frame containing BLAST/ortholog results with columns 
+#              'query_id' and 'subject_id' referencing numeric IDs.
+#
+# Returns:
+#   A data frame (orthologs) with updated 'query_id' and 'subject_id' 
+#   replaced by locus names, minus duplicates.
+###############################################################################
 parse_orthologs <- function(query, subject, orthologs){
-    # Get locus names for the query and subject proteins.
+    # Retrieve locus names from both query and subject
     query.locus <- protein_to_locus(query)
     subject.locus <- protein_to_locus(subject)
-    # Replace numeric IDs with locus names.
+    
+    # Map numeric IDs in orthologs to the actual locus strings
     orthologs$query_id <- query.locus[orthologs$query_id]
     orthologs$subject_id <- subject.locus[orthologs$subject_id]
-    # Remove duplicate entries based on query and subject locus IDs.
+    
+    # Remove duplicates by query or subject locus
     orthologs <- orthologs[!duplicated(orthologs$query_id), ]
     orthologs <- orthologs[!duplicated(orthologs$subject_id), ]
     return(orthologs)
 }
 
-# Define a list of command-line options.
+###############################################################################
+# Define command-line options
+###############################################################################
 option_list = list(
     make_option(c("-q", "--query"), type = "character", default = NULL,
-              help = "Query protein FASTA file.", metavar = "path"),
+                help = "Query protein FASTA file.", metavar = "path"),
     make_option(c("-s", "--subject"), type = "character", default = NULL,
-              help = "Subject protein FASTA file.", metavar = "path"),
+                help = "Subject protein FASTA file.", metavar = "path"),
     make_option(c("-x", "--orgSubject"), type = "character", default = NULL,
-              help = "Subject organism.", metavar = "name"),
+                help = "Subject organism.", metavar = "name"),
     make_option(c("-z", "--orgQuery"), type = "character", default = NULL,
-              help = "Query organism.", metavar = "name"),
+                help = "Query organism.", metavar = "name"),
     make_option(c("-o", "--output"), type = "character", default = NULL,
-              help = "Path to save output files.", metavar = "path"),
+                help = "Path to save output files.", metavar = "path"),
     make_option(c("-b", "--blast"), type = "character", default = "best",
-              help = "Type of BLASTp: 'best' for unidirectional best hit or 'bbh' for reciprocal best hit.", 
-              metavar = "option"),
+                help = "BLASTp mode: 'best' for unidirectional best hits, 'bbh' for reciprocal best hits.", 
+                metavar = "option"),
     make_option(c("-c", "--cores"), type = "integer", default = 1,
-              help = "Number of cores to use in BLASTp parallel processing.", metavar = "integer"),
+                help = "Number of CPU cores for BLASTp parallelization.", metavar = "integer"),
     make_option(c("-f", "--force"), type = "character", default = "True",
-              help = "Force re-run (True/False).", metavar = "character")     
+                help = "Force re-run (True/False).", metavar = "character")     
 )
 
-# Create an option parser object and parse the provided command-line arguments.
+###############################################################################
+# Parse command-line arguments
+###############################################################################
 opt_parser = OptionParser(option_list = option_list)
 opt = parse_args(opt_parser)
 
-# Print the provided query and subject FASTA file paths.
+###############################################################################
+# Print the provided query and subject FASTA paths for confirmation
+###############################################################################
 cat("Query:", opt$query, "\n")
 cat("Subject:", opt$subject, "\n")
 
-
-# Construct file paths for saving BLAST results and ortholog predictions.
+# Construct file paths for the BLAST results and ortholog output
 output.file <- file.path(opt$output, paste0("orthologs.", opt$blast, ".all.tsv"))
 blast.file <- file.path(opt$output, paste0("blastp.", opt$blast, ".all.tsv"))
 
-# Initialize data frames for BLAST results and orthologs.
+# Initialize empty data frames
 blast.result <- data.frame()
 orthologs <- data.frame()
 
-### Perform BLASTp or Read Existing Results ###
-
-# If the BLAST result file does not exist or if force re-run is enabled:
-if(!file.exists(blast.file) | (opt$force == "True")){
-
+###############################################################################
+# BLASTp Execution or Bypass
+###############################################################################
+# If the BLAST results file doesn't exist or if force re-run is "True"
+if(!file.exists(blast.file) | (opt$force == "True")) {
+    
     cat("Performing BLASTp...\n")
     
-    # Only perform BLAST if the query and subject files are different.
+    # Only run BLAST if query and subject are not the same organism
     if(opt$orgQuery != opt$orgSubject){
     
-        # Depending on the selected BLAST type, run the appropriate BLAST function.
+        # Choose which BLAST function to call based on the user's blast option
         if(opt$blast == "best"){
-            cat("Selected BLASTp is unidirectional best hit.\n")
+            cat("Selected BLASTp mode: unidirectional best hit.\n")
             blast.result <- blast_best(
                 query_file = opt$query, 
                 subject_file = opt$subject, 
                 seq_type = 'protein', 
                 comp_cores = opt$cores, 
-                clean_folders = TRUE)
+                clean_folders = TRUE
+            )
         } else if (opt$blast == "bbh"){
-            cat("Selected BLASTp is bidirectional best hit.\n")
+            cat("Selected BLASTp mode: bidirectional best hit.\n")
             blast.result <- blast_rec(
                 query_file = opt$query, 
                 subject_file = opt$subject, 
                 seq_type = 'protein', 
                 comp_cores = opt$cores, 
-                clean_folders = TRUE)
+                clean_folders = TRUE
+            )
         } else {
-            stop("Select a valid BLAST option ('best' or 'bbh').")
+            stop("Invalid BLAST option. Use 'best' or 'bbh'.")
         }
         
-        # Parse the BLAST results to convert numeric IDs to locus names.
+        # Convert numeric IDs in BLAST results to actual locus names
         orthologs <- parse_orthologs(opt$query, opt$subject, blast.result)
+        
     } else {
-        cat("Query and subject are the same file.\n")
+        cat("Query and subject appear to be the same file. Skipping BLAST.\n")
     }
+
 } else {
-    # If the BLAST file exists and force re-run is not requested, bypass BLAST.
+    # If the file is already present and no force-run, skip BLAST
     cat("Bypassing files...\n")
+    # Make sure blast.file is non-empty
     if(file.size(blast.file) > 1L){
+        # Read the stored BLAST results from disk
         blast.result <- read.delim(blast.file)
+        # Convert numeric IDs to locus names
         orthologs <- parse_orthologs(opt$query, opt$subject, blast.result)
     }
 }
 
-# Write the BLAST results to file.
+###############################################################################
+# Write BLAST results and ortholog pairs to output
+###############################################################################
 write.table(
     blast.result, 
     file = blast.file,
@@ -135,7 +181,6 @@ write.table(
     row.names = FALSE
 )
 
-# Write the parsed orthologs to file.
 write.table(
     orthologs, 
     file = output.file,
