@@ -188,6 +188,8 @@ Edit the Snakefile to point to the correct paths or keep them consistent with `c
 
 Below is a high-level summary of the pipeline (the exact steps may vary depending on the Snakefile rules):
 
+![workflow](./PLETHORA_network_workflow.png)
+
 1. **Quality Control**:  
    - `fastqc` and `multiqc` to check read quality.  
    - Optional trimming with Trimmomatic if configured.
