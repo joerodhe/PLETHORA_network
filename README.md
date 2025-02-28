@@ -1,7 +1,5 @@
 # README
 
-# README: PLT Gene Regulatory Network Workflow
-
 This repository provides a **Snakemake** workflow for modeling a gene regulatory network (GRN) driven by the PLETHORA (PLT) transcription factors in the root apical meristem (RAM) of multiple plant species. It integrates both **bulk RNA-seq** and **single-cell RNA-seq** data, performs **WGCNA**, differential expression analysis, ortholog detection, TF binding site scans, and final single-cell integration. The workflow references a central **Snakefile** and **config.yaml** for configuration details.
 
 Below are instructions for installation, configuration, and running the workflow, followed by an overview of the analysis steps.
